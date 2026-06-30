@@ -13,9 +13,6 @@ pub enum AccountError {
     #[error("校验失败: {0}")]
     Validation(String),
 
-    #[error("钥匙串操作失败: {0}")]
-    Keychain(String),
-
     #[error("存储失败: {0}")]
     Storage(String),
 }

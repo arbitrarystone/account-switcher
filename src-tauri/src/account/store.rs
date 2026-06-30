@@ -67,7 +67,7 @@ mod tests {
             tool: Tool::Claude,
             base_url: "https://relay.example.com".into(),
             model: None,
-            token_ref: id.into(),
+            token: "sk-test".into(),
             tags: None,
             extra_args: None,
             created_at: "2026-06-30T00:00:00Z".into(),

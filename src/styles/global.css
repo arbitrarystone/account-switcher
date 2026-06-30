@@ -456,6 +456,49 @@ select {
   cursor: pointer;
 }
 
+/* ── 带显隐切换的输入（Token 小眼睛）──────────────── */
+.input-with-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.input-with-toggle .form-input {
+  flex: 1;
+}
+
+.input-toggle {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.input-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.token-reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.token-reveal .input-toggle {
+  width: 26px;
+  height: 22px;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;

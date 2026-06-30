@@ -22,8 +22,6 @@ serde_json = "1"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-# 系统钥匙串：macOS Keychain / Windows Credential Manager
-keyring = { version = "3", features = ["apple-native", "windows-native"] }
 # 跨平台伪终端（内嵌终端会话）
 portable-pty = "0.9"
 # 原生对话框（项目目录选择）

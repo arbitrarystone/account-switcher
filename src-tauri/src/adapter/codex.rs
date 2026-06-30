@@ -68,7 +68,7 @@ mod tests {
             tool: Tool::Codex,
             base_url: "https://relay.example.com/v1".into(),
             model: None,
-            token_ref: "id1".into(),
+            token: "sk-tok".into(),
             tags: None,
             extra_args: None,
             created_at: "t".into(),

@@ -29,8 +29,9 @@ pub struct Account {
     pub base_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// 钥匙串键名（M1 取值等于 `id`）。
-    pub token_ref: String,
+    /// API Token —— 明文存储（用户选择便利优先：可在 UI 查看明文）。
+    #[serde(default)]
+    pub token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     /// 额外启动参数（如 `--dangerously-skip-permissions`），起任务时追加到命令行。

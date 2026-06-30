@@ -52,7 +52,7 @@ mod tests {
             tool: Tool::Claude,
             base_url: "https://relay.example.com".into(),
             model: Some("claude-opus-4".into()),
-            token_ref: "id1".into(),
+            token: "sk-tok".into(),
             tags: None,
             extra_args: None,
             created_at: "t".into(),

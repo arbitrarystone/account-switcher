@@ -44,6 +44,7 @@ function App() {
   const [setDefaultTarget, setSetDefaultTarget] = useState<Account | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<ToolDefaults>(EMPTY_DEFAULTS);
+  const [showDetailToken, setShowDetailToken] = useState(false);
   const [usage, setUsage] = useState<UsageSummary[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -301,7 +302,19 @@ function App() {
                 <dt>默认模型</dt>
                 <dd>{selected.model ?? "—"}</dd>
                 <dt>Token</dt>
-                <dd>🔒 已安全保存于系统钥匙串</dd>
+                <dd className="token-reveal">
+                  <span className="detail-mono">
+                    {showDetailToken ? selected.token : "••••••••••••"}
+                  </span>
+                  <button
+                    type="button"
+                    className="input-toggle"
+                    onClick={() => setShowDetailToken((s) => !s)}
+                    title={showDetailToken ? "隐藏" : "显示明文"}
+                  >
+                    {showDetailToken ? "🙈" : "👁"}
+                  </button>
+                </dd>
                 <dt>标签</dt>
                 <dd>{selected.tags?.length ? selected.tags.join("、") : "—"}</dd>
                 <dt>用量</dt>

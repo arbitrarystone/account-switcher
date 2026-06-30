@@ -8,7 +8,7 @@ export interface Account {
   tool: Tool;
   baseUrl: string;
   model?: string;
-  tokenRef: string;
+  token: string;
   tags?: string[];
   extraArgs?: string[];
   createdAt: string;
@@ -43,7 +43,7 @@ export interface AccountUpdate {
 
 /** 后端 `AccountError` 的序列化形态。 */
 export interface AccountError {
-  kind: "NotFound" | "Validation" | "Keychain" | "Storage";
+  kind: "NotFound" | "Validation" | "Storage";
   message: string;
 }
 

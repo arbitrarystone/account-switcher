@@ -1,5 +1,3 @@
-use crate::keychain::KeychainStore;
-
 use super::error::{AccountError, Result};
 use super::model::{
     now_rfc3339, validate_base_url, validate_name, validate_token, Account, AccountUpdate,
@@ -7,58 +5,41 @@ use super::model::{
 };
 use super::store::AccountStore;
 
-/// 账号业务逻辑：协调元数据存储（`AccountStore`）与 Token 存储（`KeychainStore`）。
+/// 账号业务逻辑（CRUD）。
 ///
-/// 通过 trait object 注入依赖，便于单元测试用内存实现替换。
+/// Token 以**明文**随元数据一起存储（用户选择便利优先：可在 UI 查看明文）。
 pub struct AccountService {
     store: Box<dyn AccountStore>,
-    keychain: Box<dyn KeychainStore>,
 }
 
 impl AccountService {
-    pub fn new(store: Box<dyn AccountStore>, keychain: Box<dyn KeychainStore>) -> Self {
-        Self { store, keychain }
+    pub fn new(store: Box<dyn AccountStore>) -> Self {
+        Self { store }
     }
 
-    /// 创建账号：校验 → Token 入钥匙串 → 元数据入库（失败回滚钥匙串）。
+    /// 创建账号：校验后入库。
     pub fn create(&self, input: NewAccount) -> Result<Account> {
         validate_name(&input.name)?;
         validate_base_url(&input.base_url)?;
         validate_token(&input.token)?;
 
-        let id = uuid::Uuid::new_v4().to_string();
-        let token_ref = id.clone();
         let now = now_rfc3339();
-
-        self.keychain
-            .set_token(&token_ref, &input.token)
-            .map_err(|e| AccountError::Keychain(e.to_string()))?;
-
         let account = Account {
-            id,
+            id: uuid::Uuid::new_v4().to_string(),
             name: input.name.trim().to_string(),
             tool: input.tool,
             base_url: input.base_url.trim().to_string(),
             model: normalize_model(input.model),
-            token_ref: token_ref.clone(),
+            token: input.token,
             tags: input.tags,
             extra_args: input.extra_args,
             created_at: now.clone(),
             updated_at: now,
         };
 
-        let mut all = match self.store.list() {
-            Ok(a) => a,
-            Err(e) => {
-                let _ = self.keychain.delete_token(&token_ref);
-                return Err(e);
-            }
-        };
+        let mut all = self.store.list()?;
         all.push(account.clone());
-        if let Err(e) = self.store.save_all(&all) {
-            let _ = self.keychain.delete_token(&token_ref);
-            return Err(e);
-        }
+        self.store.save_all(&all)?;
         Ok(account)
     }
 
@@ -74,7 +55,7 @@ impl AccountService {
             .ok_or_else(|| AccountError::NotFound(id.to_string()))
     }
 
-    /// 更新账号。`token` 提供时同步更新钥匙串。
+    /// 更新账号。各字段 `None` 表示保持不变。
     pub fn update(&self, id: &str, upd: AccountUpdate) -> Result<Account> {
         let mut all = self.store.list()?;
         let pos = all
@@ -102,9 +83,7 @@ impl AccountService {
         }
         if let Some(token) = upd.token {
             validate_token(&token)?;
-            self.keychain
-                .set_token(&acc.token_ref, &token)
-                .map_err(|e| AccountError::Keychain(e.to_string()))?;
+            acc.token = token;
         }
         acc.updated_at = now_rfc3339();
 
@@ -113,34 +92,25 @@ impl AccountService {
         Ok(acc)
     }
 
-    /// 删除账号：先移除元数据，再删钥匙串条目（幂等）。
     pub fn delete(&self, id: &str) -> Result<()> {
         let mut all = self.store.list()?;
         let pos = all
             .iter()
             .position(|a| a.id == id)
             .ok_or_else(|| AccountError::NotFound(id.to_string()))?;
-        let removed = all.remove(pos);
-        self.store.save_all(&all)?;
-        self.keychain
-            .delete_token(&removed.token_ref)
-            .map_err(|e| AccountError::Keychain(e.to_string()))?;
-        Ok(())
+        all.remove(pos);
+        self.store.save_all(&all)
     }
 
     /// 克隆账号到另一个工具（复制 BASE_URL / 模型 / Token，生成新 id）。
     pub fn clone_to(&self, id: &str, target: Tool) -> Result<Account> {
         let src = self.get(id)?;
-        let token = self
-            .keychain
-            .get_token(&src.token_ref)
-            .map_err(|e| AccountError::Keychain(e.to_string()))?;
         self.create(NewAccount {
             name: format!("{} (副本)", src.name),
             tool: target,
             base_url: src.base_url,
             model: src.model,
-            token,
+            token: src.token,
             tags: src.tags,
             extra_args: src.extra_args,
         })
@@ -148,10 +118,7 @@ impl AccountService {
 
     /// 取账号 Token（供起任务时注入 env 使用）。
     pub fn get_token(&self, id: &str) -> Result<String> {
-        let acc = self.get(id)?;
-        self.keychain
-            .get_token(&acc.token_ref)
-            .map_err(|e| AccountError::Keychain(e.to_string()))
+        Ok(self.get(id)?.token)
     }
 }
 
@@ -166,13 +133,11 @@ fn normalize_model(model: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::account::store::JsonFileStore;
-    use crate::keychain::InMemoryKeychain;
 
     fn service() -> (AccountService, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let store = Box::new(JsonFileStore::new(dir.path().join("accounts.json")));
-        let keychain = Box::new(InMemoryKeychain::default());
-        (AccountService::new(store, keychain), dir)
+        (AccountService::new(store), dir)
     }
 
     fn new_claude(name: &str) -> NewAccount {
@@ -197,9 +162,10 @@ mod tests {
     }
 
     #[test]
-    fn create_stores_token_in_keychain() {
+    fn create_stores_token_in_plaintext() {
         let (svc, _d) = service();
         let acc = svc.create(new_claude("A")).unwrap();
+        assert_eq!(acc.token, "sk-secret");
         assert_eq!(svc.get_token(&acc.id).unwrap(), "sk-secret");
     }
 
@@ -240,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn update_token_updates_keychain() {
+    fn update_token_changes_plaintext() {
         let (svc, _d) = service();
         let acc = svc.create(new_claude("A")).unwrap();
         let upd = AccountUpdate {
@@ -252,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_removes_account_and_token() {
+    fn delete_removes_account() {
         let (svc, _d) = service();
         let acc = svc.create(new_claude("A")).unwrap();
         svc.delete(&acc.id).unwrap();
@@ -268,7 +234,6 @@ mod tests {
         assert_ne!(cloned.id, src.id);
         assert_eq!(cloned.tool, Tool::Codex);
         assert_eq!(cloned.base_url, src.base_url);
-        // Token 一并复制
         assert_eq!(svc.get_token(&cloned.id).unwrap(), "sk-secret");
         assert_eq!(svc.list().unwrap().len(), 2);
     }

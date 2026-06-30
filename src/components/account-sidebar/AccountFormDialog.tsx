@@ -23,7 +23,8 @@ function AccountFormDialog({
   const [tool, setTool] = useState<Tool>(initial?.tool ?? "claude");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
   const [model, setModel] = useState(initial?.model ?? "");
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(initial?.token ?? "");
+  const [showToken, setShowToken] = useState(false);
   const [tags, setTags] = useState((initial?.tags ?? []).join(", "));
   const [extraArgs, setExtraArgs] = useState(
     (initial?.extraArgs ?? []).join(" "),
@@ -69,7 +70,7 @@ function AccountFormDialog({
           tags: list.length ? list : null,
           extraArgs: parseExtraArgs().length ? parseExtraArgs() : null,
         };
-        if (token.trim()) patch.token = token;
+        patch.token = token;
         await onUpdate(initial.id, patch);
       }
       // 成功后由父组件关闭弹窗
@@ -149,22 +150,25 @@ function AccountFormDialog({
           </label>
 
           <label className="form-row">
-            <span className="form-label">
-              Token{" "}
-              {mode === "edit" && <i className="form-optional">留空 = 不修改</i>}
-            </span>
-            <input
-              className="form-input"
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={
-                mode === "edit"
-                  ? "••••••（已安全保存于系统钥匙串）"
-                  : "中转 Bearer Token"
-              }
-              required={mode === "create"}
-            />
+            <span className="form-label">Token</span>
+            <div className="input-with-toggle">
+              <input
+                className="form-input"
+                type={showToken ? "text" : "password"}
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="中转 Bearer Token"
+                required
+              />
+              <button
+                type="button"
+                className="input-toggle"
+                onClick={() => setShowToken((s) => !s)}
+                title={showToken ? "隐藏" : "显示明文"}
+              >
+                {showToken ? "🙈" : "👁"}
+              </button>
+            </div>
           </label>
 
           <label className="form-row">

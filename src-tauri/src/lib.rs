@@ -1,20 +1,18 @@
 //! Account Switcher —— Tauri 后端入口。
 //!
 //! 模块按领域划分（见 docs/specs/account-switcher-v1.md §附录）：
-//! - `account`        账号元数据模型、持久化与业务服务（M1）
+//! - `account`        账号元数据 + 明文 Token 存储与业务服务（M1）
 //! - `adapter`        Claude / Codex 可插拔适配层（M2.1）
 //! - `pty`            伪终端会话管理与事件流（M2.2 / M3）
 //! - `config_writer`  全局默认配置原子写入器（M4）
 //! - `prefs`          偏好与记忆规则（M4 / M5）
 //! - `usage`          用量统计 SQLite（M5）
-//! - `keychain`       系统钥匙串封装
 //! - `commands`       Tauri 命令层
 
 mod account;
 mod adapter;
 mod commands;
 mod config_writer;
-mod keychain;
 mod prefs;
 mod pty;
 mod usage;
@@ -22,7 +20,6 @@ mod usage;
 use tauri::Manager;
 
 use account::{AccountService, JsonFileStore};
-use keychain::SystemKeychain;
 use prefs::PrefsStore;
 use pty::PtyManager;
 use usage::UsageStore;
@@ -38,10 +35,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // 账号元数据 / 偏好 / 用量库存于应用配置目录；Token 走系统钥匙串。
+            // 账号元数据（含明文 Token）/ 偏好 / 用量库存于应用配置目录。
             let config_dir = app.path().app_config_dir()?;
             let store = Box::new(JsonFileStore::new(config_dir.join("accounts.json")));
-            app.manage(AccountService::new(store, Box::new(SystemKeychain)));
+            app.manage(AccountService::new(store));
             app.manage(PtyManager::default());
             app.manage(PrefsStore::load(config_dir.join("prefs.json")));
             app.manage(UsageStore::open(&config_dir.join("usage.db"))?);
