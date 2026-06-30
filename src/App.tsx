@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -6,7 +6,7 @@ import AccountFormDialog from "./components/account-sidebar/AccountFormDialog";
 import AccountSidebar from "./components/account-sidebar/AccountSidebar";
 import TerminalTabs, { type TerminalSession } from "./components/terminal-tabs/TerminalTabs";
 import { useAccounts } from "./hooks/useAccounts";
-import { errorMessage, sessionApi } from "./lib/api";
+import { defaultsApi, errorMessage, sessionApi, type ToolDefaults } from "./lib/api";
 import type { Account, Tool } from "./lib/types";
 import { TOOL_LABELS } from "./lib/types";
 
@@ -15,13 +15,17 @@ interface DialogState {
   initial: Account | null;
 }
 
+const EMPTY_DEFAULTS: ToolDefaults = { claude: null, codex: null };
+
 function App() {
   const accounts = useAccounts();
   const [version, setVersion] = useState("…");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
+  const [setDefaultTarget, setSetDefaultTarget] = useState<Account | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [defaults, setDefaults] = useState<ToolDefaults>(EMPTY_DEFAULTS);
 
   // 起任务条 + 多会话
   const [projectDir, setProjectDir] = useState("");
@@ -30,11 +34,19 @@ function App() {
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
+  const loadDefaults = useCallback(() => {
+    defaultsApi
+      .get()
+      .then(setDefaults)
+      .catch(() => setDefaults(EMPTY_DEFAULTS));
+  }, []);
+
   useEffect(() => {
     invoke<string>("app_version")
       .then(setVersion)
       .catch(() => setVersion("offline"));
-  }, []);
+    loadDefaults();
+  }, [loadDefaults]);
 
   const selected = accounts.accounts.find((a) => a.id === selectedId) ?? null;
   const banner = actionError ?? accounts.error;
@@ -61,13 +73,15 @@ function App() {
         cols: 80,
       });
       const acc = accounts.accounts.find((a) => a.id === launchAccountId);
-      const newSession: TerminalSession = {
-        id: sid,
-        accountName: acc?.name ?? "",
-        projectDir,
-        tool: acc?.tool ?? "claude",
-      };
-      setSessions((prev) => [...prev, newSession]);
+      setSessions((prev) => [
+        ...prev,
+        {
+          id: sid,
+          accountName: acc?.name ?? "",
+          projectDir,
+          tool: acc?.tool ?? "claude",
+        },
+      ]);
       setActiveSessionId(sid);
     } catch (e: unknown) {
       setActionError(errorMessage(e));
@@ -99,6 +113,28 @@ function App() {
     }
   };
 
+  const handleClearDefault = async (account: Account) => {
+    setActionError(null);
+    try {
+      await defaultsApi.clear(account.tool);
+      loadDefaults();
+    } catch (e: unknown) {
+      setActionError(errorMessage(e));
+    }
+  };
+
+  const confirmSetDefault = async () => {
+    if (!setDefaultTarget) return;
+    setActionError(null);
+    try {
+      await defaultsApi.set(setDefaultTarget.tool, setDefaultTarget.id);
+      loadDefaults();
+      setSetDefaultTarget(null);
+    } catch (e: unknown) {
+      setActionError(errorMessage(e));
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     setActionError(null);
@@ -107,6 +143,7 @@ function App() {
       if (selectedId === deleteTarget.id) setSelectedId(null);
       if (launchAccountId === deleteTarget.id) setLaunchAccountId("");
       setDeleteTarget(null);
+      loadDefaults();
     } catch (e: unknown) {
       setActionError(errorMessage(e));
     }
@@ -166,11 +203,14 @@ function App() {
           accounts={accounts.accounts}
           loading={accounts.loading}
           selectedId={selectedId}
+          defaults={defaults}
           onSelect={setSelectedId}
           onAdd={() => setDialog({ mode: "create", initial: null })}
           onEdit={(a) => setDialog({ mode: "edit", initial: a })}
           onClone={handleClone}
           onDelete={(a) => setDeleteTarget(a)}
+          onSetDefault={(a) => setSetDefaultTarget(a)}
+          onClearDefault={handleClearDefault}
         />
 
         <main className={"terminal-area" + (sessions.length ? " has-session" : "")}>
@@ -187,6 +227,11 @@ function App() {
                 <span className="account-dot" data-tool={selected.tool} aria-hidden="true" />
                 <h2 className="detail-name">{selected.name}</h2>
                 <span className="detail-tool">{TOOL_LABELS[selected.tool]}</span>
+                {defaults[selected.tool] === selected.id && (
+                  <span className="detail-default" title="全局默认">
+                    ★ 默认
+                  </span>
+                )}
               </div>
               <dl className="detail-grid">
                 <dt>BASE_URL</dt>
@@ -203,8 +248,8 @@ function App() {
                 </dd>
               </dl>
               <p className="detail-hint">
-                在顶部选择项目目录后点「起任务」，即可用此账号开一个隔离终端会话；
-                可重复起任务，多账号并发跑在不同标签里。
+                选项目目录后点「起任务」开隔离终端会话；可重复起任务多账号并发。
+                ☆ 设为全局默认后，app 外的终端也会跟随此账号。
               </p>
             </div>
           ) : (
@@ -276,6 +321,41 @@ function App() {
               </button>
               <button className="btn btn-danger" onClick={confirmDelete}>
                 删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {setDefaultTarget && (
+        <div className="dialog-backdrop" onClick={() => setSetDefaultTarget(null)}>
+          <div className="dialog dialog-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="dialog-head">
+              <h2 className="dialog-title">设为全局默认</h2>
+            </div>
+            <div className="dialog-body">
+              <p>
+                将账号 <strong>{setDefaultTarget.name}</strong> 设为{" "}
+                {TOOL_LABELS[setDefaultTarget.tool]} 的全局默认。
+              </p>
+              {setDefaultTarget.tool === "claude" ? (
+                <p className="form-warning">
+                  ⚠️ Token 将以明文写入 <code>~/.claude/settings.json</code>，
+                  app 外的终端也会跟随此账号。
+                </p>
+              ) : (
+                <p className="form-warning">
+                  ⚠️ 将写入 <code>~/.codex/config.toml</code>。Codex 的 Token 走环境变量{" "}
+                  <code>ACCSW_CODEX_TOKEN</code>，app 外使用需自行在 shell 设置该变量。
+                </p>
+              )}
+            </div>
+            <div className="dialog-foot">
+              <button className="btn btn-ghost" onClick={() => setSetDefaultTarget(null)}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={confirmSetDefault}>
+                确定设为默认
               </button>
             </div>
           </div>

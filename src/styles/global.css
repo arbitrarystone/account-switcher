@@ -723,6 +723,34 @@ select {
   font-size: var(--text-xs);
 }
 
+.form-warning {
+  padding: var(--space-2) var(--space-3);
+  background: oklch(80% 0.14 85 / 0.12);
+  border: 1px solid oklch(80% 0.14 85 / 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--warn);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.dialog-body code {
+  padding: 1px 5px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.detail-default {
+  margin-left: var(--space-2);
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--warn);
+  background: oklch(80% 0.14 85 / 0.12);
+  border-radius: var(--radius-sm);
+}
+
 /* ── 分段选择（工具）──────────────────────────────── */
 .seg {
   display: inline-flex;

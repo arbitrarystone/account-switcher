@@ -1,14 +1,16 @@
-//! Tauri 命令层（薄封装，转发到服务 / 适配器 / PTY）。
+//! Tauri 命令层（薄封装，转发到服务 / 适配器 / PTY / 配置写入器）。
 //!
 //! 命令参数遵循 Tauri 约定：前端传 camelCase，Rust 端用 snake_case，自动转换。
 
 use std::path::Path;
 use std::sync::Arc;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::account::{Account, AccountError, AccountService, AccountUpdate, NewAccount, Tool};
 use crate::adapter::adapter_for;
+use crate::config_writer;
+use crate::prefs::PrefsStore;
 use crate::pty::{PtyManager, TauriSink};
 
 // ── 账号 CRUD ───────────────────────────────────────────
@@ -57,7 +59,6 @@ pub fn account_clone(
 // ── 起任务 / PTY 会话 ────────────────────────────────────
 
 /// 起一个隔离终端会话：取账号 + Token → 适配器构造隔离启动规格 → PTY 拉起子进程。
-/// 返回新会话 id（前端用它订阅 `pty://output` / 回写输入）。
 #[tauri::command]
 pub fn launch_session(
     app: AppHandle,
@@ -98,4 +99,72 @@ pub fn pty_resize(
 #[tauri::command]
 pub fn pty_close(pty: State<PtyManager>, session_id: String) {
     pty.close(&session_id);
+}
+
+// ── 全局默认（M4）────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct Defaults {
+    claude: Option<String>,
+    codex: Option<String>,
+}
+
+/// 设全局默认账号：写工具的全局配置文件 + 记录到 prefs。
+/// ⚠️ Claude 的 Token 会以明文写入 settings.json（前端需先确认）。
+#[tauri::command]
+pub fn set_default(
+    app: AppHandle,
+    service: State<AccountService>,
+    prefs: State<PrefsStore>,
+    tool: Tool,
+    account_id: String,
+) -> Result<(), String> {
+    let account = service.get(&account_id).map_err(|e| e.to_string())?;
+    if account.tool != tool {
+        return Err("账号与所选工具不匹配".to_string());
+    }
+    let token = service.get_token(&account_id).map_err(|e| e.to_string())?;
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    match tool {
+        Tool::Claude => config_writer::write_claude_default(
+            &home.join(".claude"),
+            &account.base_url,
+            &token,
+            account.model.as_deref(),
+        )
+        .map_err(|e| e.to_string())?,
+        Tool::Codex => config_writer::write_codex_default(
+            &home.join(".codex"),
+            "accsw",
+            &account.base_url,
+            "ACCSW_CODEX_TOKEN",
+            account.model.as_deref(),
+        )
+        .map_err(|e| e.to_string())?,
+    }
+    prefs.set_default(tool, &account_id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_default(app: AppHandle, prefs: State<PrefsStore>, tool: Tool) -> Result<(), String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    match tool {
+        Tool::Claude => {
+            config_writer::clear_claude_default(&home.join(".claude")).map_err(|e| e.to_string())?
+        }
+        Tool::Codex => config_writer::clear_codex_default(&home.join(".codex"), "accsw")
+            .map_err(|e| e.to_string())?,
+    }
+    prefs.clear_default(tool)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_defaults(prefs: State<PrefsStore>) -> Defaults {
+    let p = prefs.snapshot();
+    Defaults {
+        claude: p.default_account_by_tool.get("claude").cloned(),
+        codex: p.default_account_by_tool.get("codex").cloned(),
+    }
 }

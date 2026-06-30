@@ -48,6 +48,20 @@ export const sessionApi = {
     listen<PtyExit>("pty://exit", (e) => cb(e.payload)),
 };
 
+// ── 全局默认（M4）────────────────────────────────────────
+
+export interface ToolDefaults {
+  claude: string | null;
+  codex: string | null;
+}
+
+export const defaultsApi = {
+  get: () => invoke<ToolDefaults>("get_defaults"),
+  set: (tool: Tool, accountId: string) =>
+    invoke<void>("set_default", { tool, accountId }),
+  clear: (tool: Tool) => invoke<void>("clear_default", { tool }),
+};
+
 /** 把后端错误（`AccountError` 对象或字符串）转为可展示文案。 */
 export function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;

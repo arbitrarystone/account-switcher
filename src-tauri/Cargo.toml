@@ -28,6 +28,10 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 portable-pty = "0.9"
 # 原生对话框（项目目录选择）
 tauri-plugin-dialog = "2"
+# TOML 读写（Codex 全局配置）
+toml = "0.8"
+# 用量统计本地库
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

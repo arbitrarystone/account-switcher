@@ -1,3 +1,4 @@
+import type { ToolDefaults } from "../../lib/api";
 import type { Account, Tool } from "../../lib/types";
 import { TOOL_LABELS } from "../../lib/types";
 
@@ -5,11 +6,14 @@ interface AccountSidebarProps {
   accounts: Account[];
   loading: boolean;
   selectedId: string | null;
+  defaults: ToolDefaults;
   onSelect: (id: string) => void;
   onAdd: () => void;
   onEdit: (account: Account) => void;
   onClone: (account: Account) => void;
   onDelete: (account: Account) => void;
+  onSetDefault: (account: Account) => void;
+  onClearDefault: (account: Account) => void;
 }
 
 const TOOLS: readonly Tool[] = ["claude", "codex"];
@@ -18,11 +22,14 @@ function AccountSidebar({
   accounts,
   loading,
   selectedId,
+  defaults,
   onSelect,
   onAdd,
   onEdit,
   onClone,
   onDelete,
+  onSetDefault,
+  onClearDefault,
 }: AccountSidebarProps) {
   return (
     <aside className="account-sidebar">
@@ -49,51 +56,74 @@ function AccountSidebar({
             return (
               <section key={tool} className="account-group">
                 <h3 className="group-label">{TOOL_LABELS[tool]}</h3>
-                {group.map((account) => (
-                  <div
-                    key={account.id}
-                    className="account-item"
-                    aria-current={selectedId === account.id}
-                    onClick={() => onSelect(account.id)}
-                  >
-                    <span className="account-dot" data-tool={account.tool} aria-hidden="true" />
-                    <span className="account-name" title={account.baseUrl}>
-                      {account.name}
-                    </span>
-                    <span className="account-actions">
-                      <button
-                        className="account-action"
-                        title="编辑"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEdit(account);
-                        }}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="account-action"
-                        title="克隆到另一工具"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onClone(account);
-                        }}
-                      >
-                        ⎘
-                      </button>
-                      <button
-                        className="account-action account-action-danger"
-                        title="删除"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDelete(account);
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  </div>
-                ))}
+                {group.map((account) => {
+                  const isDefault = defaults[account.tool] === account.id;
+                  return (
+                    <div
+                      key={account.id}
+                      className="account-item"
+                      aria-current={selectedId === account.id}
+                      onClick={() => onSelect(account.id)}
+                    >
+                      <span
+                        className="account-dot"
+                        data-tool={account.tool}
+                        aria-hidden="true"
+                      />
+                      <span className="account-name" title={account.baseUrl}>
+                        {account.name}
+                      </span>
+                      {isDefault && (
+                        <span className="account-default" title="全局默认">
+                          ★
+                        </span>
+                      )}
+                      <span className="account-actions">
+                        <button
+                          className="account-action"
+                          title={isDefault ? "取消全局默认" : "设为全局默认"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isDefault) onClearDefault(account);
+                            else onSetDefault(account);
+                          }}
+                        >
+                          {isDefault ? "★" : "☆"}
+                        </button>
+                        <button
+                          className="account-action"
+                          title="编辑"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit(account);
+                          }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="account-action"
+                          title="克隆到另一工具"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClone(account);
+                          }}
+                        >
+                          ⎘
+                        </button>
+                        <button
+                          className="account-action account-action-danger"
+                          title="删除"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(account);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
               </section>
             );
           })}
