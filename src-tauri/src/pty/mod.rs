@@ -1,14 +1,14 @@
 //! 伪终端会话管理。
 //!
 //! 每个会话 = 一对 PTY + 子进程 + 读线程 + 等待线程。
-//! 读线程把输出经 Tauri 事件 `pty://output` 推给前端；
-//! 子进程退出时发 `pty://exit`。前端输入经 [`PtyManager::write`] 回写。
+//! 输出/退出经 [`OutputSink`] 抽象转发：生产用 [`TauriSink`]（推 Tauri 事件），
+//! 测试用内存收集器（无需 Tauri runtime 即可验证 env 隔离）。
 //!
-//! 多会话由 [`PtyManager`] 统一持有（M3 并发隔离即基于此）。
+//! 多会话由 [`PtyManager`] 统一持有 —— 这是 M3 并发隔离的基础。
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
@@ -24,6 +24,12 @@ pub enum PtyError {
     NotFound(String),
     #[error("写入失败: {0}")]
     Write(String),
+}
+
+/// 会话输出/退出的接收端。解耦具体传输，便于测试。
+pub trait OutputSink: Send + Sync + 'static {
+    fn output(&self, session_id: &str, data: &str);
+    fn exit(&self, session_id: &str, code: i32);
 }
 
 /// 推给前端的输出事件载荷。
@@ -42,6 +48,39 @@ struct PtyExit {
     code: i32,
 }
 
+/// 生产实现：把会话输出/退出转发为 Tauri 前端事件。
+pub struct TauriSink {
+    app: AppHandle,
+}
+
+impl TauriSink {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+impl OutputSink for TauriSink {
+    fn output(&self, session_id: &str, data: &str) {
+        let _ = self.app.emit(
+            "pty://output",
+            PtyOutput {
+                session_id: session_id.to_string(),
+                data: data.to_string(),
+            },
+        );
+    }
+
+    fn exit(&self, session_id: &str, code: i32) {
+        let _ = self.app.emit(
+            "pty://exit",
+            PtyExit {
+                session_id: session_id.to_string(),
+                code,
+            },
+        );
+    }
+}
+
 struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
@@ -57,7 +96,7 @@ impl PtyManager {
     /// 按 [`LaunchSpec`] 在隔离 env 下拉起子进程，启动读/等待线程。
     pub fn spawn(
         &self,
-        app: &AppHandle,
+        sink: Arc<dyn OutputSink>,
         session_id: String,
         spec: LaunchSpec,
         rows: u16,
@@ -105,8 +144,8 @@ impl PtyManager {
             },
         );
 
-        // 读线程：PTY 输出 → 前端事件
-        let app_read = app.clone();
+        // 读线程：PTY 输出 → sink
+        let sink_read = Arc::clone(&sink);
         let sid_read = session_id.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
@@ -115,30 +154,17 @@ impl PtyManager {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         let data = String::from_utf8_lossy(&buf[..n]).into_owned();
-                        let _ = app_read.emit(
-                            "pty://output",
-                            PtyOutput {
-                                session_id: sid_read.clone(),
-                                data,
-                            },
-                        );
+                        sink_read.output(&sid_read, &data);
                     }
                 }
             }
         });
 
-        // 等待线程：子进程退出 → 退出事件
-        let app_exit = app.clone();
+        // 等待线程：子进程退出 → sink
         let sid_exit = session_id;
         std::thread::spawn(move || {
             let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
-            let _ = app_exit.emit(
-                "pty://exit",
-                PtyExit {
-                    session_id: sid_exit,
-                    code,
-                },
-            );
+            sink.exit(&sid_exit, code);
         });
 
         Ok(())
@@ -180,5 +206,140 @@ impl PtyManager {
     /// 关闭会话：移除并 drop（PTY 关闭，子进程收到挂断信号而退出）。
     pub fn close(&self, session_id: &str) {
         self.sessions.lock().unwrap().remove(session_id);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    /// 测试用内存收集器。
+    #[derive(Default)]
+    struct VecSink {
+        outputs: Mutex<Vec<(String, String)>>,
+        exits: Mutex<Vec<(String, i32)>>,
+    }
+
+    impl VecSink {
+        fn output_for(&self, sid: &str) -> String {
+            self.outputs
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(s, _)| s == sid)
+                .map(|(_, d)| d.clone())
+                .collect()
+        }
+        fn exit_count(&self) -> usize {
+            self.exits.lock().unwrap().len()
+        }
+    }
+
+    impl OutputSink for VecSink {
+        fn output(&self, session_id: &str, data: &str) {
+            self.outputs
+                .lock()
+                .unwrap()
+                .push((session_id.to_string(), data.to_string()));
+        }
+        fn exit(&self, session_id: &str, code: i32) {
+            self.exits
+                .lock()
+                .unwrap()
+                .push((session_id.to_string(), code));
+        }
+    }
+
+    /// 构造一个回显两个鉴权变量的「假 CLI」启动规格。
+    fn echo_env_spec(base: &str, token: &str) -> LaunchSpec {
+        let mut env = BTreeMap::new();
+        env.insert("ANTHROPIC_BASE_URL".to_string(), base.to_string());
+        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token.to_string());
+        LaunchSpec {
+            program: "/bin/sh".to_string(),
+            args: vec![
+                "-c".to_string(),
+                "printf 'BASE=%s TOK=%s' \"$ANTHROPIC_BASE_URL\" \"$ANTHROPIC_AUTH_TOKEN\""
+                    .to_string(),
+            ],
+            env,
+            cwd: std::env::temp_dir(),
+        }
+    }
+
+    fn wait_exits(sink: &VecSink, n: usize) {
+        for _ in 0..50 {
+            if sink.exit_count() >= n {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("超时：会话未在预期时间内退出");
+    }
+
+    #[test]
+    fn concurrent_sessions_get_isolated_env() {
+        let mgr = PtyManager::default();
+        let sink = Arc::new(VecSink::default());
+
+        // 两个账号并发起会话
+        mgr.spawn(
+            sink.clone(),
+            "sa".to_string(),
+            echo_env_spec("https://a.example.com", "tok-a"),
+            24,
+            80,
+        )
+        .unwrap();
+        mgr.spawn(
+            sink.clone(),
+            "sb".to_string(),
+            echo_env_spec("https://b.example.com", "tok-b"),
+            24,
+            80,
+        )
+        .unwrap();
+
+        wait_exits(&sink, 2);
+
+        let out_a = sink.output_for("sa");
+        let out_b = sink.output_for("sb");
+
+        // 各自拿到正确的注入值
+        assert!(
+            out_a.contains("BASE=https://a.example.com"),
+            "A 实际: {out_a:?}"
+        );
+        assert!(out_a.contains("TOK=tok-a"), "A 实际: {out_a:?}");
+        assert!(
+            out_b.contains("BASE=https://b.example.com"),
+            "B 实际: {out_b:?}"
+        );
+        assert!(out_b.contains("TOK=tok-b"), "B 实际: {out_b:?}");
+
+        // 真隔离：彼此不串号
+        assert!(!out_a.contains("tok-b"), "A 串入了 B 的 token");
+        assert!(!out_b.contains("tok-a"), "B 串入了 A 的 token");
+    }
+
+    #[test]
+    fn env_clear_strips_inherited_vars() {
+        // 父进程设一个脏变量，子进程不应继承（env_clear 生效）
+        std::env::set_var("ACCSW_TEST_LEAK", "should-not-appear");
+        let mgr = PtyManager::default();
+        let sink = Arc::new(VecSink::default());
+        let mut spec = echo_env_spec("https://x.example.com", "tok-x");
+        spec.args = vec![
+            "-c".to_string(),
+            "printf 'LEAK=[%s]' \"$ACCSW_TEST_LEAK\"".to_string(),
+        ];
+        mgr.spawn(sink.clone(), "sx".to_string(), spec, 24, 80)
+            .unwrap();
+        wait_exits(&sink, 1);
+        let out = sink.output_for("sx");
+        assert!(out.contains("LEAK=[]"), "继承了未注入的父进程变量: {out:?}");
+        std::env::remove_var("ACCSW_TEST_LEAK");
     }
 }

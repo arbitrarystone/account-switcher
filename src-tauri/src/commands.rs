@@ -3,12 +3,13 @@
 //! 命令参数遵循 Tauri 约定：前端传 camelCase，Rust 端用 snake_case，自动转换。
 
 use std::path::Path;
+use std::sync::Arc;
 
 use tauri::{AppHandle, State};
 
 use crate::account::{Account, AccountError, AccountService, AccountUpdate, NewAccount, Tool};
 use crate::adapter::adapter_for;
-use crate::pty::PtyManager;
+use crate::pty::{PtyManager, TauriSink};
 
 // ── 账号 CRUD ───────────────────────────────────────────
 
@@ -72,7 +73,8 @@ pub fn launch_session(
     let spec =
         adapter_for(account.tool).build_session_launch(&account, &token, Path::new(&project_dir));
     let session_id = uuid::Uuid::new_v4().to_string();
-    pty.spawn(&app, session_id.clone(), spec, rows, cols)
+    let sink = Arc::new(TauriSink::new(app));
+    pty.spawn(sink, session_id.clone(), spec, rows, cols)
         .map_err(|e| e.to_string())?;
     Ok(session_id)
 }

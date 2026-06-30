@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import AccountFormDialog from "./components/account-sidebar/AccountFormDialog";
 import AccountSidebar from "./components/account-sidebar/AccountSidebar";
-import TerminalView from "./components/terminal-tabs/TerminalView";
+import TerminalTabs, { type TerminalSession } from "./components/terminal-tabs/TerminalTabs";
 import { useAccounts } from "./hooks/useAccounts";
 import { errorMessage, sessionApi } from "./lib/api";
 import type { Account, Tool } from "./lib/types";
@@ -15,13 +15,6 @@ interface DialogState {
   initial: Account | null;
 }
 
-interface SessionState {
-  id: string;
-  accountName: string;
-  projectDir: string;
-  tool: Tool;
-}
-
 function App() {
   const accounts = useAccounts();
   const [version, setVersion] = useState("…");
@@ -30,11 +23,12 @@ function App() {
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // 起任务条状态
+  // 起任务条 + 多会话
   const [projectDir, setProjectDir] = useState("");
   const [launchAccountId, setLaunchAccountId] = useState("");
   const [launching, setLaunching] = useState(false);
-  const [session, setSession] = useState<SessionState | null>(null);
+  const [sessions, setSessions] = useState<TerminalSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<string>("app_version")
@@ -44,7 +38,7 @@ function App() {
 
   const selected = accounts.accounts.find((a) => a.id === selectedId) ?? null;
   const banner = actionError ?? accounts.error;
-  const canLaunch = Boolean(projectDir && launchAccountId && !launching && !session);
+  const canLaunch = Boolean(projectDir && launchAccountId && !launching);
 
   const handlePickDir = async () => {
     try {
@@ -67,12 +61,14 @@ function App() {
         cols: 80,
       });
       const acc = accounts.accounts.find((a) => a.id === launchAccountId);
-      setSession({
+      const newSession: TerminalSession = {
         id: sid,
         accountName: acc?.name ?? "",
         projectDir,
         tool: acc?.tool ?? "claude",
-      });
+      };
+      setSessions((prev) => [...prev, newSession]);
+      setActiveSessionId(sid);
     } catch (e: unknown) {
       setActionError(errorMessage(e));
     } finally {
@@ -80,19 +76,18 @@ function App() {
     }
   };
 
-  const handleCloseSession = async () => {
-    if (!session) return;
+  const handleCloseSession = async (id: string) => {
     try {
-      await sessionApi.close(session.id);
+      await sessionApi.close(id);
     } catch {
       /* 关闭失败可忽略 */
     }
-    setSession(null);
+    const next = sessions.filter((s) => s.id !== id);
+    setSessions(next);
+    if (id === activeSessionId) {
+      setActiveSessionId(next.length ? next[next.length - 1].id : null);
+    }
   };
-
-  const handleSessionExit = useCallback(() => {
-    // 进程已退出，终端内已提示退出码；保留视图供查看，用户手动结束会话。
-  }, []);
 
   const handleClone = async (account: Account) => {
     setActionError(null);
@@ -136,11 +131,7 @@ function App() {
                 title={projectDir}
                 readOnly
               />
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={handlePickDir}
-                disabled={!!session}
-              >
+              <button className="btn btn-ghost btn-sm" onClick={handlePickDir}>
                 选择…
               </button>
             </div>
@@ -151,7 +142,7 @@ function App() {
               className="field-input"
               value={launchAccountId}
               onChange={(e) => setLaunchAccountId(e.target.value)}
-              disabled={!!session || accounts.accounts.length === 0}
+              disabled={accounts.accounts.length === 0}
             >
               <option value="">
                 {accounts.accounts.length ? "选择账号…" : "暂无账号"}
@@ -182,21 +173,14 @@ function App() {
           onDelete={(a) => setDeleteTarget(a)}
         />
 
-        <main className={"terminal-area" + (session ? " has-session" : "")}>
-          {session ? (
-            <div className="session-pane">
-              <div className="session-head">
-                <span className="account-dot" data-tool={session.tool} aria-hidden="true" />
-                <span className="session-title">{session.accountName}</span>
-                <span className="session-path" title={session.projectDir}>
-                  {session.projectDir}
-                </span>
-                <button className="btn btn-ghost btn-sm" onClick={handleCloseSession}>
-                  结束会话
-                </button>
-              </div>
-              <TerminalView sessionId={session.id} onExit={handleSessionExit} />
-            </div>
+        <main className={"terminal-area" + (sessions.length ? " has-session" : "")}>
+          {sessions.length > 0 ? (
+            <TerminalTabs
+              sessions={sessions}
+              activeId={activeSessionId}
+              onActivate={setActiveSessionId}
+              onClose={handleCloseSession}
+            />
           ) : selected ? (
             <div className="account-detail">
               <div className="detail-head">
@@ -219,7 +203,8 @@ function App() {
                 </dd>
               </dl>
               <p className="detail-hint">
-                在顶部选择项目目录后点「起任务」，即可用此账号开一个隔离终端会话。
+                在顶部选择项目目录后点「起任务」，即可用此账号开一个隔离终端会话；
+                可重复起任务，多账号并发跑在不同标签里。
               </p>
             </div>
           ) : (
@@ -247,7 +232,9 @@ function App() {
         ) : (
           <span className="status-item">
             <span className="status-dot" data-state="ok" aria-hidden="true" />
-            {session ? "会话运行中" : `就绪 · ${accounts.accounts.length} 个账号`}
+            {sessions.length
+              ? `${sessions.length} 个会话运行中`
+              : `就绪 · ${accounts.accounts.length} 个账号`}
           </span>
         )}
         <span className="status-spacer" />
