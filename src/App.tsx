@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import AccountFormDialog from "./components/account-sidebar/AccountFormDialog";
 import AccountSidebar from "./components/account-sidebar/AccountSidebar";
+import EyeToggle from "./components/ui/EyeToggle";
 import TerminalTabs, { type TerminalSession } from "./components/terminal-tabs/TerminalTabs";
 import { useAccounts } from "./hooks/useAccounts";
 import {
@@ -397,16 +398,14 @@ function App() {
                 <dt>Token</dt>
                 <dd className="token-reveal">
                   <span className="detail-mono">
-                    {showDetailToken ? selected.token : "••••••••••••"}
+                    {showDetailToken
+                      ? selected.token || "（未设置，请编辑账号填入）"
+                      : "••••••••••••"}
                   </span>
-                  <button
-                    type="button"
-                    className="input-toggle"
-                    onClick={() => setShowDetailToken((s) => !s)}
-                    title={showDetailToken ? "隐藏" : "显示明文"}
-                  >
-                    {showDetailToken ? "🙈" : "👁"}
-                  </button>
+                  <EyeToggle
+                    shown={showDetailToken}
+                    onToggle={() => setShowDetailToken((s) => !s)}
+                  />
                 </dd>
                 <dt>标签</dt>
                 <dd>{selected.tags?.length ? selected.tags.join("、") : "—"}</dd>

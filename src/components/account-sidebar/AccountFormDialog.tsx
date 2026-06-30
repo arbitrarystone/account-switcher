@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 
+import EyeToggle from "../ui/EyeToggle";
 import { errorMessage } from "../../lib/api";
 import type { Account, AccountUpdate, NewAccount, Tool } from "../../lib/types";
 import { TOOL_LABELS } from "../../lib/types";
@@ -24,7 +25,7 @@ function AccountFormDialog({
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
   const [model, setModel] = useState(initial?.model ?? "");
   const [token, setToken] = useState(initial?.token ?? "");
-  const [showToken, setShowToken] = useState(false);
+  const [showToken, setShowToken] = useState(true);
   const [tags, setTags] = useState((initial?.tags ?? []).join(", "));
   const [extraArgs, setExtraArgs] = useState(
     (initial?.extraArgs ?? []).join(" "),
@@ -160,14 +161,7 @@ function AccountFormDialog({
                 placeholder="中转 Bearer Token"
                 required
               />
-              <button
-                type="button"
-                className="input-toggle"
-                onClick={() => setShowToken((s) => !s)}
-                title={showToken ? "隐藏" : "显示明文"}
-              >
-                {showToken ? "🙈" : "👁"}
-              </button>
+              <EyeToggle shown={showToken} onToggle={() => setShowToken((s) => !s)} />
             </div>
           </label>
 
