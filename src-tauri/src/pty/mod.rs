@@ -123,6 +123,10 @@ impl PtyManager {
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }
+        // PTY 由 xterm.js 渲染：显式声明终端能力，否则 GUI app 启动时无 TERM，
+        // claude/codex 检测不到彩色终端而退化为无颜色输出。
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
 
         let mut child = pair
             .slave
