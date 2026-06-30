@@ -42,7 +42,28 @@ function TerminalView({ sessionId, onExit }: TerminalViewProps) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
-    fit.fit();
+
+    // fit + 把实际尺寸同步给 PTY。容器尺寸为 0（如标签未激活）时 fit 抛错，忽略。
+    const syncSize = () => {
+      try {
+        fit.fit();
+        void sessionApi.resize(sessionId, term.rows, term.cols);
+      } catch {
+        /* 容器尺寸为 0 时 fit 会抛错 */
+      }
+    };
+
+    // 首次 fit 必须等等宽字体加载完成 —— 否则用 fallback 字体度量 cell 宽度，
+    // 算出的 cols 偏差，导致子进程按错误宽度换行（格式错位）。
+    let raf = 0;
+    const initialFit = () => {
+      raf = requestAnimationFrame(syncSize);
+    };
+    if (document.fonts && document.fonts.status !== "loaded") {
+      void document.fonts.ready.then(initialFit);
+    } else {
+      initialFit();
+    }
 
     // 输入：键入 → 写回 PTY
     const dataDisposable = term.onData((data) => {
@@ -69,18 +90,14 @@ function TerminalView({ sessionId, onExit }: TerminalViewProps) {
       }),
     );
 
-    // 容器尺寸变化 → fit + 同步 PTY 视口
-    const syncSize = () => {
-      fit.fit();
-      void sessionApi.resize(sessionId, term.rows, term.cols);
-    };
-    const observer = new ResizeObserver(syncSize);
+    // 容器尺寸变化（含标签激活、窗口/侧栏变化）→ refit + 同步 PTY
+    const observer = new ResizeObserver(() => syncSize());
     observer.observe(container);
-    syncSize();
     term.focus();
 
     return () => {
       disposed = true;
+      cancelAnimationFrame(raf);
       dataDisposable.dispose();
       unsubs.forEach((u) => u());
       observer.disconnect();

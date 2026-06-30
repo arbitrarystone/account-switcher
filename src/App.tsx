@@ -45,6 +45,7 @@ function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<ToolDefaults>(EMPTY_DEFAULTS);
   const [usage, setUsage] = useState<UsageSummary[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // 起任务条 + 多会话
   const [projectDir, setProjectDir] = useState("");
@@ -194,6 +195,14 @@ function App() {
       {/* ── 顶部：起任务条 ─────────────────────────────── */}
       <header className="launch-bar">
         <div className="brand">
+          <button
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((c) => !c)}
+            title={sidebarCollapsed ? "展开账号栏" : "收起账号栏"}
+            aria-label="切换账号栏"
+          >
+            {sidebarCollapsed ? "»" : "«"}
+          </button>
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">Account Switcher</span>
         </div>
@@ -238,7 +247,7 @@ function App() {
       </header>
 
       {/* ── 工作区：账号侧栏 + 终端/详情区 ──────────────── */}
-      <div className="workbench">
+      <div className={"workbench" + (sidebarCollapsed ? " sidebar-collapsed" : "")}>
         <AccountSidebar
           accounts={accounts.accounts}
           loading={accounts.loading}

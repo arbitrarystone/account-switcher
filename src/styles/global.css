@@ -239,6 +239,36 @@ select {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
   min-height: 0;
+  transition: grid-template-columns var(--dur-normal) var(--ease);
+}
+
+.workbench.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+
+.workbench.sidebar-collapsed .account-sidebar {
+  overflow: hidden;
+  border-right: none;
+}
+
+.sidebar-toggle {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 /* ── 账号侧栏 ───────────────────────────────────── */

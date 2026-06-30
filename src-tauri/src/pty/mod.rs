@@ -147,17 +147,35 @@ impl PtyManager {
             },
         );
 
-        // 读线程：PTY 输出 → sink
+        // 读线程：PTY 输出 → sink。
+        // 维护跨读取的 pending 缓冲，避免多字节 UTF-8 字符在 8192 边界被切断成乱码。
         let sink_read = Arc::clone(&sink);
         let sid_read = session_id.clone();
         std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
+            let mut pending: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        let data = String::from_utf8_lossy(&buf[..n]).into_owned();
-                        sink_read.output(&sid_read, &data);
+                        pending.extend_from_slice(&buf[..n]);
+                        // 只解码到最后一个完整 UTF-8 边界，残余不完整字节留到下次。
+                        let valid_up_to = match std::str::from_utf8(&pending) {
+                            Ok(s) => s.len(),
+                            Err(e) => e.valid_up_to(),
+                        };
+                        if valid_up_to > 0 {
+                            let data =
+                                String::from_utf8_lossy(&pending[..valid_up_to]).into_owned();
+                            sink_read.output(&sid_read, &data);
+                            pending.drain(..valid_up_to);
+                        }
+                        // 防御：残余超过 UTF-8 单字符最大长度仍无效，必是坏字节，lossy 冲刷。
+                        if pending.len() > 4 {
+                            let data = String::from_utf8_lossy(&pending).into_owned();
+                            sink_read.output(&sid_read, &data);
+                            pending.clear();
+                        }
                     }
                 }
             }
