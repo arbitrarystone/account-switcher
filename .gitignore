@@ -1,0 +1,19 @@
+# 依赖与构建产物
+node_modules/
+dist/
+target/
+
+# Tauri
+src-tauri/target/
+
+# 可视化伴侣生成物
+.superpowers/
+
+# 本地数据与密钥（绝不入库）
+*.db
+*.sqlite
+.env
+.env.*
+
+# 系统
+.DS_Store
