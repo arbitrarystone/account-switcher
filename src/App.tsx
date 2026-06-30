@@ -6,7 +6,15 @@ import AccountFormDialog from "./components/account-sidebar/AccountFormDialog";
 import AccountSidebar from "./components/account-sidebar/AccountSidebar";
 import TerminalTabs, { type TerminalSession } from "./components/terminal-tabs/TerminalTabs";
 import { useAccounts } from "./hooks/useAccounts";
-import { defaultsApi, errorMessage, sessionApi, type ToolDefaults } from "./lib/api";
+import {
+  defaultsApi,
+  errorMessage,
+  memoryApi,
+  sessionApi,
+  usageApi,
+  type ToolDefaults,
+  type UsageSummary,
+} from "./lib/api";
 import type { Account, Tool } from "./lib/types";
 import { TOOL_LABELS } from "./lib/types";
 
@@ -17,6 +25,16 @@ interface DialogState {
 
 const EMPTY_DEFAULTS: ToolDefaults = { claude: null, codex: null };
 
+/** 秒 → 友好时长。 */
+function formatDuration(sec: number): string {
+  if (sec <= 0) return "0 秒";
+  if (sec < 60) return `${sec} 秒`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m} 分钟`;
+  const h = Math.floor(m / 60);
+  return `${h} 小时 ${m % 60} 分`;
+}
+
 function App() {
   const accounts = useAccounts();
   const [version, setVersion] = useState("…");
@@ -26,6 +44,7 @@ function App() {
   const [setDefaultTarget, setSetDefaultTarget] = useState<Account | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<ToolDefaults>(EMPTY_DEFAULTS);
+  const [usage, setUsage] = useState<UsageSummary[]>([]);
 
   // 起任务条 + 多会话
   const [projectDir, setProjectDir] = useState("");
@@ -41,21 +60,40 @@ function App() {
       .catch(() => setDefaults(EMPTY_DEFAULTS));
   }, []);
 
+  const loadUsage = useCallback(() => {
+    usageApi
+      .summary()
+      .then(setUsage)
+      .catch(() => setUsage([]));
+  }, []);
+
   useEffect(() => {
     invoke<string>("app_version")
       .then(setVersion)
       .catch(() => setVersion("offline"));
     loadDefaults();
-  }, [loadDefaults]);
+    loadUsage();
+  }, [loadDefaults, loadUsage]);
 
   const selected = accounts.accounts.find((a) => a.id === selectedId) ?? null;
+  const selectedUsage = usage.find((u) => u.accountId === selectedId) ?? null;
   const banner = actionError ?? accounts.error;
   const canLaunch = Boolean(projectDir && launchAccountId && !launching);
 
   const handlePickDir = async () => {
     try {
       const dir = await open({ directory: true, title: "选择项目目录" });
-      if (typeof dir === "string") setProjectDir(dir);
+      if (typeof dir !== "string") return;
+      setProjectDir(dir);
+      // 记忆：预填该项目上次用过的账号
+      const [lastClaude, lastCodex] = await Promise.all([
+        memoryApi.getLast(dir, "claude"),
+        memoryApi.getLast(dir, "codex"),
+      ]);
+      const last = lastClaude ?? lastCodex;
+      if (last && accounts.accounts.some((a) => a.id === last)) {
+        setLaunchAccountId(last);
+      }
     } catch (e: unknown) {
       setActionError(errorMessage(e));
     }
@@ -83,6 +121,7 @@ function App() {
         },
       ]);
       setActiveSessionId(sid);
+      loadUsage();
     } catch (e: unknown) {
       setActionError(errorMessage(e));
     } finally {
@@ -101,6 +140,7 @@ function App() {
     if (id === activeSessionId) {
       setActiveSessionId(next.length ? next[next.length - 1].id : null);
     }
+    loadUsage();
   };
 
   const handleClone = async (account: Account) => {
@@ -242,6 +282,12 @@ function App() {
                 <dd>🔒 已安全保存于系统钥匙串</dd>
                 <dt>标签</dt>
                 <dd>{selected.tags?.length ? selected.tags.join("、") : "—"}</dd>
+                <dt>用量</dt>
+                <dd>
+                  {selectedUsage
+                    ? `${selectedUsage.sessions} 次会话 · 累计 ${formatDuration(selectedUsage.totalDurationSec)}`
+                    : "暂无记录"}
+                </dd>
                 <dt>创建时间</dt>
                 <dd className="detail-mono">
                   {new Date(selected.createdAt).toLocaleString()}

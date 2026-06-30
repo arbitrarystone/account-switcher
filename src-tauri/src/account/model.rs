@@ -11,7 +11,6 @@ pub enum Tool {
 }
 
 impl Tool {
-    #[allow(dead_code)] // M2 适配器构造 env/args 时使用
     pub fn as_str(self) -> &'static str {
         match self {
             Tool::Claude => "claude",

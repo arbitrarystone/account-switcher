@@ -6,6 +6,7 @@
 //! - `pty`            伪终端会话管理与事件流（M2.2 / M3）
 //! - `config_writer`  全局默认配置原子写入器（M4）
 //! - `prefs`          偏好与记忆规则（M4 / M5）
+//! - `usage`          用量统计 SQLite（M5）
 //! - `keychain`       系统钥匙串封装
 //! - `commands`       Tauri 命令层
 
@@ -14,9 +15,9 @@ mod adapter;
 mod commands;
 mod config_writer;
 mod keychain;
-#[allow(dead_code)] // M5.2 记忆规则接入后移除
 mod prefs;
 mod pty;
+mod usage;
 
 use tauri::Manager;
 
@@ -24,6 +25,7 @@ use account::{AccountService, JsonFileStore};
 use keychain::SystemKeychain;
 use prefs::PrefsStore;
 use pty::PtyManager;
+use usage::UsageStore;
 
 /// 返回应用版本（占位命令，用于前后端连通性自检）。
 #[tauri::command]
@@ -36,12 +38,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // 账号元数据 / 偏好存于应用配置目录；Token 走系统钥匙串。
+            // 账号元数据 / 偏好 / 用量库存于应用配置目录；Token 走系统钥匙串。
             let config_dir = app.path().app_config_dir()?;
             let store = Box::new(JsonFileStore::new(config_dir.join("accounts.json")));
             app.manage(AccountService::new(store, Box::new(SystemKeychain)));
             app.manage(PtyManager::default());
             app.manage(PrefsStore::load(config_dir.join("prefs.json")));
+            app.manage(UsageStore::open(&config_dir.join("usage.db"))?);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -59,6 +62,8 @@ pub fn run() {
             commands::set_default,
             commands::clear_default,
             commands::get_defaults,
+            commands::get_usage_summary,
+            commands::get_last_account,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

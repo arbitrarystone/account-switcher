@@ -62,6 +62,24 @@ export const defaultsApi = {
   clear: (tool: Tool) => invoke<void>("clear_default", { tool }),
 };
 
+// ── 用量 / 记忆（M5）─────────────────────────────────────
+
+export interface UsageSummary {
+  accountId: string;
+  sessions: number;
+  totalDurationSec: number;
+  lastUsed: string | null;
+}
+
+export const usageApi = {
+  summary: () => invoke<UsageSummary[]>("get_usage_summary"),
+};
+
+export const memoryApi = {
+  getLast: (projectDir: string, tool: Tool) =>
+    invoke<string | null>("get_last_account", { projectDir, tool }),
+};
+
 /** 把后端错误（`AccountError` 对象或字符串）转为可展示文案。 */
 export function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;

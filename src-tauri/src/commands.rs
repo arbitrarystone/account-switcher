@@ -1,4 +1,4 @@
-//! Tauri 命令层（薄封装，转发到服务 / 适配器 / PTY / 配置写入器）。
+//! Tauri 命令层（薄封装，转发到服务 / 适配器 / PTY / 配置写入器 / 用量）。
 //!
 //! 命令参数遵循 Tauri 约定：前端传 camelCase，Rust 端用 snake_case，自动转换。
 
@@ -12,6 +12,7 @@ use crate::adapter::adapter_for;
 use crate::config_writer;
 use crate::prefs::PrefsStore;
 use crate::pty::{PtyManager, TauriSink};
+use crate::usage::{UsageStore, UsageSummary};
 
 // ── 账号 CRUD ───────────────────────────────────────────
 
@@ -59,11 +60,15 @@ pub fn account_clone(
 // ── 起任务 / PTY 会话 ────────────────────────────────────
 
 /// 起一个隔离终端会话：取账号 + Token → 适配器构造隔离启动规格 → PTY 拉起子进程。
+/// 同时记录用量（start）与「项目上次账号」记忆。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn launch_session(
     app: AppHandle,
     service: State<AccountService>,
     pty: State<PtyManager>,
+    usage: State<UsageStore>,
+    prefs: State<PrefsStore>,
     account_id: String,
     project_dir: String,
     rows: u16,
@@ -74,7 +79,20 @@ pub fn launch_session(
     let spec =
         adapter_for(account.tool).build_session_launch(&account, &token, Path::new(&project_dir));
     let session_id = uuid::Uuid::new_v4().to_string();
-    let sink = Arc::new(TauriSink::new(app));
+    let started_at = chrono::Utc::now().to_rfc3339();
+
+    usage
+        .record_start(
+            &session_id,
+            &account_id,
+            account.tool.as_str(),
+            &project_dir,
+            &started_at,
+        )
+        .map_err(|e| e.to_string())?;
+    let _ = prefs.set_last(&project_dir, account.tool, &account_id);
+
+    let sink = Arc::new(TauriSink::new(app, (*usage).clone()));
     pty.spawn(sink, session_id.clone(), spec, rows, cols)
         .map_err(|e| e.to_string())?;
     Ok(session_id)
@@ -167,4 +185,20 @@ pub fn get_defaults(prefs: State<PrefsStore>) -> Defaults {
         claude: p.default_account_by_tool.get("claude").cloned(),
         codex: p.default_account_by_tool.get("codex").cloned(),
     }
+}
+
+// ── 用量 / 记忆（M5）─────────────────────────────────────
+
+#[tauri::command]
+pub fn get_usage_summary(usage: State<UsageStore>) -> Result<Vec<UsageSummary>, String> {
+    usage.summary().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_last_account(
+    prefs: State<PrefsStore>,
+    project_dir: String,
+    tool: Tool,
+) -> Option<String> {
+    prefs.get_last(&project_dir, tool)
 }

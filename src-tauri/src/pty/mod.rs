@@ -48,14 +48,15 @@ struct PtyExit {
     code: i32,
 }
 
-/// 生产实现：把会话输出/退出转发为 Tauri 前端事件。
+/// 生产实现：把会话输出/退出转发为 Tauri 前端事件，并在退出时记录用量。
 pub struct TauriSink {
     app: AppHandle,
+    usage: crate::usage::UsageStore,
 }
 
 impl TauriSink {
-    pub fn new(app: AppHandle) -> Self {
-        Self { app }
+    pub fn new(app: AppHandle, usage: crate::usage::UsageStore) -> Self {
+        Self { app, usage }
     }
 }
 
@@ -71,6 +72,8 @@ impl OutputSink for TauriSink {
     }
 
     fn exit(&self, session_id: &str, code: i32) {
+        let ended_at = chrono::Utc::now().to_rfc3339();
+        let _ = self.usage.record_end(session_id, &ended_at, code);
         let _ = self.app.emit(
             "pty://exit",
             PtyExit {
