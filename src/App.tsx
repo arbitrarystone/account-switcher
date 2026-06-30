@@ -51,6 +51,7 @@ function App() {
   const [projectDir, setProjectDir] = useState("");
   const [launchAccountId, setLaunchAccountId] = useState("");
   const [launching, setLaunching] = useState(false);
+  const [skipPermissions, setSkipPermissions] = useState(false);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
@@ -108,6 +109,7 @@ function App() {
       const sid = await sessionApi.launch({
         accountId: launchAccountId,
         projectDir,
+        skipPermissions,
         rows: 24,
         cols: 80,
       });
@@ -239,6 +241,17 @@ function App() {
                 </option>
               ))}
             </select>
+          </label>
+          <label
+            className="skip-perm"
+            title="claude 加 --dangerously-skip-permissions；codex 加 --dangerously-bypass-approvals-and-sandbox"
+          >
+            <input
+              type="checkbox"
+              checked={skipPermissions}
+              onChange={(e) => setSkipPermissions(e.target.checked)}
+            />
+            <span>跳过权限</span>
           </label>
           <button className="btn btn-primary" onClick={handleLaunch} disabled={!canLaunch}>
             {launching ? "起任务中…" : "起任务"}

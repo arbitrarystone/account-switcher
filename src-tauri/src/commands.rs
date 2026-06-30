@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 
 use crate::account::{Account, AccountError, AccountService, AccountUpdate, NewAccount, Tool};
-use crate::adapter::adapter_for;
+use crate::adapter::{adapter_for, LaunchOpts};
 use crate::config_writer;
 use crate::prefs::PrefsStore;
 use crate::pty::{PtyManager, TauriSink};
@@ -71,13 +71,19 @@ pub fn launch_session(
     prefs: State<PrefsStore>,
     account_id: String,
     project_dir: String,
+    skip_permissions: bool,
     rows: u16,
     cols: u16,
 ) -> Result<String, String> {
     let account = service.get(&account_id).map_err(|e| e.to_string())?;
     let token = service.get_token(&account_id).map_err(|e| e.to_string())?;
-    let spec =
-        adapter_for(account.tool).build_session_launch(&account, &token, Path::new(&project_dir));
+    let opts = LaunchOpts { skip_permissions };
+    let spec = adapter_for(account.tool).build_session_launch(
+        &account,
+        &token,
+        Path::new(&project_dir),
+        &opts,
+    );
     let session_id = uuid::Uuid::new_v4().to_string();
     let started_at = chrono::Utc::now().to_rfc3339();
 

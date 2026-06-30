@@ -10,6 +10,7 @@ export interface Account {
   model?: string;
   tokenRef: string;
   tags?: string[];
+  extraArgs?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -22,6 +23,7 @@ export interface NewAccount {
   model?: string;
   token: string;
   tags?: string[];
+  extraArgs?: string[];
 }
 
 /**
@@ -36,6 +38,7 @@ export interface AccountUpdate {
   model?: string | null;
   token?: string;
   tags?: string[] | null;
+  extraArgs?: string[] | null;
 }
 
 /** 后端 `AccountError` 的序列化形态。 */

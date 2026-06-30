@@ -25,6 +25,9 @@ function AccountFormDialog({
   const [model, setModel] = useState(initial?.model ?? "");
   const [token, setToken] = useState("");
   const [tags, setTags] = useState((initial?.tags ?? []).join(", "));
+  const [extraArgs, setExtraArgs] = useState(
+    (initial?.extraArgs ?? []).join(" "),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +35,12 @@ function AccountFormDialog({
     tags
       .split(",")
       .map((t) => t.trim())
+      .filter(Boolean);
+
+  const parseExtraArgs = (): string[] =>
+    extraArgs
+      .split(/\s+/)
+      .map((a) => a.trim())
       .filter(Boolean);
 
   const submit = async (e: FormEvent) => {
@@ -48,6 +57,7 @@ function AccountFormDialog({
           model: model.trim() || undefined,
           token,
           tags: list.length ? list : undefined,
+          extraArgs: parseExtraArgs().length ? parseExtraArgs() : undefined,
         };
         await onCreate(input);
       } else if (initial) {
@@ -57,6 +67,7 @@ function AccountFormDialog({
           baseUrl: baseUrl.trim(),
           model: model.trim() ? model.trim() : null,
           tags: list.length ? list : null,
+          extraArgs: parseExtraArgs().length ? parseExtraArgs() : null,
         };
         if (token.trim()) patch.token = token;
         await onUpdate(initial.id, patch);
@@ -165,6 +176,22 @@ function AccountFormDialog({
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               placeholder="如 高额度, 备用"
+            />
+          </label>
+
+          <label className="form-row">
+            <span className="form-label">
+              额外启动参数 <i className="form-optional">可选，空格分隔</i>
+            </span>
+            <input
+              className="form-input"
+              value={extraArgs}
+              onChange={(e) => setExtraArgs(e.target.value)}
+              placeholder={
+                tool === "claude"
+                  ? "如 --dangerously-skip-permissions"
+                  : "如 --full-auto"
+              }
             />
           </label>
 

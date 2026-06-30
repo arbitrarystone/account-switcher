@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::env_hygiene::clean_base_env;
-use super::{LaunchSpec, ToolAdapter};
+use super::{LaunchOpts, LaunchSpec, ToolAdapter};
 use crate::account::Account;
 
 /// Claude Code 适配器：通过 env 注入中转 BASE_URL + AUTH_TOKEN（按会话隔离）。
@@ -13,6 +13,7 @@ impl ToolAdapter for ClaudeAdapter {
         account: &Account,
         token: &str,
         project_dir: &Path,
+        opts: &LaunchOpts,
     ) -> LaunchSpec {
         let mut env = clean_base_env();
         env.insert("ANTHROPIC_BASE_URL".to_string(), account.base_url.clone());
@@ -20,9 +21,18 @@ impl ToolAdapter for ClaudeAdapter {
         if let Some(model) = &account.model {
             env.insert("ANTHROPIC_MODEL".to_string(), model.clone());
         }
+
+        let mut args = Vec::new();
+        if opts.skip_permissions {
+            args.push("--dangerously-skip-permissions".to_string());
+        }
+        if let Some(extra) = &account.extra_args {
+            args.extend(extra.iter().cloned());
+        }
+
         LaunchSpec {
             program: "claude".to_string(),
-            args: Vec::new(),
+            args,
             env,
             cwd: project_dir.to_path_buf(),
         }
@@ -44,6 +54,7 @@ mod tests {
             model: Some("claude-opus-4".into()),
             token_ref: "id1".into(),
             tags: None,
+            extra_args: None,
             created_at: "t".into(),
             updated_at: "t".into(),
         }
@@ -51,7 +62,12 @@ mod tests {
 
     #[test]
     fn injects_base_url_and_token() {
-        let spec = ClaudeAdapter.build_session_launch(&account(), "sk-tok", Path::new("/proj"));
+        let spec = ClaudeAdapter.build_session_launch(
+            &account(),
+            "sk-tok",
+            Path::new("/proj"),
+            &LaunchOpts::default(),
+        );
         assert_eq!(spec.program, "claude");
         assert!(spec.args.is_empty());
         assert_eq!(
@@ -67,14 +83,33 @@ mod tests {
     fn omits_model_when_absent() {
         let mut acc = account();
         acc.model = None;
-        let spec = ClaudeAdapter.build_session_launch(&acc, "t", Path::new("/p"));
+        let spec =
+            ClaudeAdapter.build_session_launch(&acc, "t", Path::new("/p"), &LaunchOpts::default());
         assert!(!spec.env.contains_key("ANTHROPIC_MODEL"));
     }
 
     #[test]
     fn does_not_leak_dirty_auth_vars() {
-        // clean_base_env 应已剔除脏变量；这里仅断言注入后不含残留 API_KEY
-        let spec = ClaudeAdapter.build_session_launch(&account(), "t", Path::new("/p"));
+        let spec = ClaudeAdapter.build_session_launch(
+            &account(),
+            "t",
+            Path::new("/p"),
+            &LaunchOpts::default(),
+        );
         assert!(!spec.env.contains_key("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn skip_permissions_and_extra_args_appended() {
+        let mut acc = account();
+        acc.extra_args = Some(vec!["--verbose".to_string()]);
+        let opts = LaunchOpts {
+            skip_permissions: true,
+        };
+        let spec = ClaudeAdapter.build_session_launch(&acc, "t", Path::new("/p"), &opts);
+        assert_eq!(
+            spec.args,
+            vec!["--dangerously-skip-permissions", "--verbose"]
+        );
     }
 }

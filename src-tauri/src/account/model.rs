@@ -33,6 +33,9 @@ pub struct Account {
     pub token_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    /// 额外启动参数（如 `--dangerously-skip-permissions`），起任务时追加到命令行。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_args: Option<Vec<String>>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -49,6 +52,8 @@ pub struct NewAccount {
     pub token: String,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub extra_args: Option<Vec<String>>,
 }
 
 /// 更新账号输入。每个字段 `None` 表示「保持不变」。
@@ -68,6 +73,8 @@ pub struct AccountUpdate {
     pub token: Option<String>,
     #[serde(default)]
     pub tags: Option<Option<Vec<String>>>,
+    #[serde(default)]
+    pub extra_args: Option<Option<Vec<String>>>,
 }
 
 /// 当前 UTC 时间（RFC3339 字符串）。

@@ -21,6 +21,14 @@ pub struct LaunchSpec {
     pub cwd: PathBuf,
 }
 
+/// 起任务的运行期选项（不持久化，来自起任务条）。
+#[derive(Debug, Default, Clone)]
+pub struct LaunchOpts {
+    /// 跳过权限确认：Claude 加 `--dangerously-skip-permissions`，
+    /// Codex 加 `--dangerously-bypass-approvals-and-sandbox`。
+    pub skip_permissions: bool,
+}
+
 /// 工具适配器：按会话隔离地构造启动规格。
 pub trait ToolAdapter {
     fn build_session_launch(
@@ -28,6 +36,7 @@ pub trait ToolAdapter {
         account: &Account,
         token: &str,
         project_dir: &Path,
+        opts: &LaunchOpts,
     ) -> LaunchSpec;
 }
 

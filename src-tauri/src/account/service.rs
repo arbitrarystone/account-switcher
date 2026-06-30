@@ -42,6 +42,7 @@ impl AccountService {
             model: normalize_model(input.model),
             token_ref: token_ref.clone(),
             tags: input.tags,
+            extra_args: input.extra_args,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -96,6 +97,9 @@ impl AccountService {
         if let Some(tags) = upd.tags {
             acc.tags = tags;
         }
+        if let Some(extra_args) = upd.extra_args {
+            acc.extra_args = extra_args;
+        }
         if let Some(token) = upd.token {
             validate_token(&token)?;
             self.keychain
@@ -138,6 +142,7 @@ impl AccountService {
             model: src.model,
             token,
             tags: src.tags,
+            extra_args: src.extra_args,
         })
     }
 
@@ -178,6 +183,7 @@ mod tests {
             model: None,
             token: "sk-secret".into(),
             tags: None,
+            extra_args: None,
         }
     }
 

@@ -34,6 +34,7 @@ export const sessionApi = {
   launch: (params: {
     accountId: string;
     projectDir: string;
+    skipPermissions: boolean;
     rows: number;
     cols: number;
   }) => invoke<string>("launch_session", params),

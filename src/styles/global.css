@@ -442,6 +442,20 @@ select {
   white-space: nowrap;
 }
 
+.skip-perm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.skip-perm input {
+  cursor: pointer;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;

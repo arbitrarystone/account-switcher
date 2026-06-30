@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::env_hygiene::clean_base_env;
-use super::{LaunchSpec, ToolAdapter};
+use super::{LaunchOpts, LaunchSpec, ToolAdapter};
 use crate::account::Account;
 
 /// 会话内 provider 标识与 token 环境变量名（按会话隔离，进程间不共享，固定名即可）。
@@ -18,6 +18,7 @@ impl ToolAdapter for CodexAdapter {
         account: &Account,
         token: &str,
         project_dir: &Path,
+        opts: &LaunchOpts,
     ) -> LaunchSpec {
         let mut env = clean_base_env();
         env.insert(TOKEN_ENV.to_string(), token.to_string());
@@ -38,6 +39,12 @@ impl ToolAdapter for CodexAdapter {
         if let Some(model) = &account.model {
             args.push("-c".to_string());
             args.push(format!("model=\"{model}\""));
+        }
+        if opts.skip_permissions {
+            args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+        }
+        if let Some(extra) = &account.extra_args {
+            args.extend(extra.iter().cloned());
         }
 
         LaunchSpec {
@@ -63,6 +70,7 @@ mod tests {
             model: None,
             token_ref: "id1".into(),
             tags: None,
+            extra_args: None,
             created_at: "t".into(),
             updated_at: "t".into(),
         }
@@ -70,7 +78,12 @@ mod tests {
 
     #[test]
     fn builds_inline_provider_args() {
-        let spec = CodexAdapter.build_session_launch(&account(), "sk-tok", Path::new("/proj"));
+        let spec = CodexAdapter.build_session_launch(
+            &account(),
+            "sk-tok",
+            Path::new("/proj"),
+            &LaunchOpts::default(),
+        );
         assert_eq!(spec.program, "codex");
         // token 走 env，不进命令行
         assert_eq!(spec.env.get(TOKEN_ENV).unwrap(), "sk-tok");
@@ -86,7 +99,19 @@ mod tests {
     fn appends_model_override_when_present() {
         let mut acc = account();
         acc.model = Some("gpt-5-codex".into());
-        let spec = CodexAdapter.build_session_launch(&acc, "t", Path::new("/p"));
+        let spec =
+            CodexAdapter.build_session_launch(&acc, "t", Path::new("/p"), &LaunchOpts::default());
         assert!(spec.args.join(" ").contains("model=\"gpt-5-codex\""));
+    }
+
+    #[test]
+    fn skip_permissions_appends_bypass_flag() {
+        let opts = LaunchOpts {
+            skip_permissions: true,
+        };
+        let spec = CodexAdapter.build_session_launch(&account(), "t", Path::new("/p"), &opts);
+        assert!(spec
+            .args
+            .contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
     }
 }

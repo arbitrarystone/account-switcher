@@ -69,6 +69,7 @@ mod tests {
             model: None,
             token_ref: id.into(),
             tags: None,
+            extra_args: None,
             created_at: "2026-06-30T00:00:00Z".into(),
             updated_at: "2026-06-30T00:00:00Z".into(),
         }

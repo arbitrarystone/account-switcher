@@ -37,13 +37,63 @@ where
 }
 
 /// 取当前进程 env 并清洗，作为子进程的干净基底。
+///
+/// 额外补全 PATH：macOS GUI app 从 Finder/Dock 启动时只继承最小 PATH
+/// （`/usr/bin:/bin:...`），找不到用户经 nvm / npm 等安装的 claude/codex。
+/// 故用登录 shell 的完整 PATH 合并补全。
 pub fn clean_base_env() -> BTreeMap<String, String> {
-    sanitize(std::env::vars())
+    let mut env = sanitize(std::env::vars());
+    if let Some(login_path) = login_shell_path() {
+        let merged = merge_paths(&login_path, env.get("PATH").map(String::as_str));
+        env.insert("PATH".to_string(), merged);
+    }
+    env
+}
+
+/// 合并登录 PATH 与现有 PATH：登录 PATH 优先，去重保序。
+fn merge_paths(login: &str, current: Option<&str>) -> String {
+    let mut seen = std::collections::HashSet::new();
+    login
+        .split(':')
+        .chain(current.unwrap_or("").split(':'))
+        .filter(|p| !p.is_empty() && seen.insert(p.to_string()))
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// 获取登录交互 shell 的完整 PATH（仅执行一次并缓存）。
+/// 失败（如非类 Unix 或无 SHELL）时返回 None，调用方退回当前 PATH。
+fn login_shell_path() -> Option<String> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Option<String>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let shell = std::env::var("SHELL").ok()?;
+            // -l 加载 profile、-i 加载 rc（PATH 常在 .zshrc/.bashrc 里设置）
+            let output = std::process::Command::new(&shell)
+                .args(["-lic", "echo \"__ACCSW__${PATH}__ACCSW__\""])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let out = String::from_utf8_lossy(&output.stdout);
+            let inner = out.split("__ACCSW__").nth(1)?.trim().to_string();
+            (!inner.is_empty()).then_some(inner)
+        })
+        .clone()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_paths_dedups_login_first() {
+        assert_eq!(merge_paths("/a:/b", Some("/b:/usr/bin")), "/a:/b:/usr/bin");
+        assert_eq!(merge_paths("/a:/b", None), "/a:/b");
+        assert_eq!(merge_paths("/a", Some("")), "/a");
+    }
 
     #[test]
     fn removes_exact_dirty_keys() {
