@@ -26,6 +26,9 @@ impl ToolAdapter for ClaudeAdapter {
         if opts.skip_permissions {
             args.push("--dangerously-skip-permissions".to_string());
         }
+        if opts.resume {
+            args.push("--continue".to_string());
+        }
         if let Some(extra) = &account.extra_args {
             args.extend(extra.iter().cloned());
         }
@@ -105,6 +108,7 @@ mod tests {
         acc.extra_args = Some(vec!["--verbose".to_string()]);
         let opts = LaunchOpts {
             skip_permissions: true,
+            ..Default::default()
         };
         let spec = ClaudeAdapter.build_session_launch(&acc, "t", Path::new("/p"), &opts);
         assert_eq!(

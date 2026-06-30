@@ -27,6 +27,8 @@ pub struct LaunchOpts {
     /// 跳过权限确认：Claude 加 `--dangerously-skip-permissions`，
     /// Codex 加 `--dangerously-bypass-approvals-and-sandbox`。
     pub skip_permissions: bool,
+    /// 续接上次对话：Claude 加 `--continue`（恢复会话时使用）。
+    pub resume: bool,
 }
 
 /// 工具适配器：按会话隔离地构造启动规格。

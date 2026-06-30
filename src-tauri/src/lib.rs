@@ -15,6 +15,7 @@ mod commands;
 mod config_writer;
 mod prefs;
 mod pty;
+mod session;
 mod usage;
 
 use tauri::Manager;
@@ -22,6 +23,7 @@ use tauri::Manager;
 use account::{AccountService, JsonFileStore};
 use prefs::PrefsStore;
 use pty::PtyManager;
+use session::SessionStore;
 use usage::UsageStore;
 
 /// 返回应用版本（占位命令，用于前后端连通性自检）。
@@ -41,6 +43,7 @@ pub fn run() {
             app.manage(AccountService::new(store));
             app.manage(PtyManager::default());
             app.manage(PrefsStore::load(config_dir.join("prefs.json")));
+            app.manage(SessionStore::load(config_dir.join("sessions.json")));
             app.manage(UsageStore::open(&config_dir.join("usage.db"))?);
             Ok(())
         })
@@ -61,6 +64,10 @@ pub fn run() {
             commands::get_defaults,
             commands::get_usage_summary,
             commands::get_last_account,
+            commands::get_sessions,
+            commands::get_open_sessions,
+            commands::session_closed,
+            commands::remove_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

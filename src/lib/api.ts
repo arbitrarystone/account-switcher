@@ -1,7 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type { Account, AccountUpdate, NewAccount, Tool } from "./types";
+import type {
+  Account,
+  AccountUpdate,
+  NewAccount,
+  SessionRecord,
+  Tool,
+} from "./types";
 
 /**
  * 账号相关 Tauri 命令封装。参数名与 Rust 命令签名一一对应。
@@ -35,9 +41,16 @@ export const sessionApi = {
     accountId: string;
     projectDir: string;
     skipPermissions: boolean;
+    resume: boolean;
     rows: number;
     cols: number;
   }) => invoke<string>("launch_session", params),
+  history: () => invoke<SessionRecord[]>("get_sessions"),
+  openSessions: () => invoke<SessionRecord[]>("get_open_sessions"),
+  markClosed: (accountId: string, projectDir: string) =>
+    invoke<void>("session_closed", { accountId, projectDir }),
+  removeHistory: (accountId: string, projectDir: string) =>
+    invoke<void>("remove_session", { accountId, projectDir }),
   write: (sessionId: string, data: string) =>
     invoke<void>("pty_write", { sessionId, data }),
   resize: (sessionId: string, rows: number, cols: number) =>

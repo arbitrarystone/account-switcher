@@ -499,6 +499,93 @@ select {
   height: 22px;
 }
 
+/* ── 会话历史（空状态恢复入口）──────────────────── */
+.session-history {
+  width: 100%;
+  max-width: 420px;
+  margin-top: var(--space-5);
+  text-align: left;
+}
+
+.history-title {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+
+.history-item:hover {
+  background: var(--bg-hover);
+}
+
+.history-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--ok);
+  background: oklch(76% 0.14 150 / 0.14);
+  border-radius: 999px;
+}
+
+.history-remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.history-item:hover .history-remove {
+  opacity: 1;
+}
+
+.history-remove:hover {
+  color: var(--danger);
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;

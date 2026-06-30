@@ -12,6 +12,7 @@ use crate::adapter::{adapter_for, LaunchOpts};
 use crate::config_writer;
 use crate::prefs::PrefsStore;
 use crate::pty::{PtyManager, TauriSink};
+use crate::session::{SessionRecord, SessionStore};
 use crate::usage::{UsageStore, UsageSummary};
 
 // ── 账号 CRUD ───────────────────────────────────────────
@@ -69,15 +70,20 @@ pub fn launch_session(
     pty: State<PtyManager>,
     usage: State<UsageStore>,
     prefs: State<PrefsStore>,
+    session: State<SessionStore>,
     account_id: String,
     project_dir: String,
     skip_permissions: bool,
+    resume: bool,
     rows: u16,
     cols: u16,
 ) -> Result<String, String> {
     let account = service.get(&account_id).map_err(|e| e.to_string())?;
     let token = service.get_token(&account_id).map_err(|e| e.to_string())?;
-    let opts = LaunchOpts { skip_permissions };
+    let opts = LaunchOpts {
+        skip_permissions,
+        resume,
+    };
     let spec = adapter_for(account.tool).build_session_launch(
         &account,
         &token,
@@ -97,11 +103,51 @@ pub fn launch_session(
         )
         .map_err(|e| e.to_string())?;
     let _ = prefs.set_last(&project_dir, account.tool, &account_id);
+    let title = format!("{} · {}", account.name, project_basename(&project_dir));
+    let _ = session.record_open(&account_id, account.tool, &project_dir, &title, &started_at);
 
     let sink = Arc::new(TauriSink::new(app, (*usage).clone()));
     pty.spawn(sink, session_id.clone(), spec, rows, cols)
         .map_err(|e| e.to_string())?;
     Ok(session_id)
+}
+
+/// 取项目目录的最后一段作为简短标题。
+fn project_basename(dir: &str) -> String {
+    Path::new(dir)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| dir.to_string())
+}
+
+// ── 会话管理（持久化 + 恢复）──────────────────────────────
+
+#[tauri::command]
+pub fn get_sessions(session: State<SessionStore>) -> Vec<SessionRecord> {
+    session.list()
+}
+
+#[tauri::command]
+pub fn get_open_sessions(session: State<SessionStore>) -> Vec<SessionRecord> {
+    session.open_sessions()
+}
+
+#[tauri::command]
+pub fn session_closed(
+    session: State<SessionStore>,
+    account_id: String,
+    project_dir: String,
+) -> Result<(), String> {
+    session.mark_closed(&account_id, &project_dir)
+}
+
+#[tauri::command]
+pub fn remove_session(
+    session: State<SessionStore>,
+    account_id: String,
+    project_dir: String,
+) -> Result<(), String> {
+    session.remove(&account_id, &project_dir)
 }
 
 #[tauri::command]

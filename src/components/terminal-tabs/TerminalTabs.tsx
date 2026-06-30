@@ -7,6 +7,7 @@ import "./terminal.css";
 
 export interface TerminalSession {
   id: string;
+  accountId: string;
   accountName: string;
   projectDir: string;
   tool: Tool;

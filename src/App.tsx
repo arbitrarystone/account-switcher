@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -15,7 +15,7 @@ import {
   type ToolDefaults,
   type UsageSummary,
 } from "./lib/api";
-import type { Account, Tool } from "./lib/types";
+import type { Account, SessionRecord, Tool } from "./lib/types";
 import { TOOL_LABELS } from "./lib/types";
 
 interface DialogState {
@@ -55,6 +55,8 @@ function App() {
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [history, setHistory] = useState<SessionRecord[]>([]);
+  const restoredRef = useRef(false);
 
   const loadDefaults = useCallback(() => {
     defaultsApi
@@ -70,13 +72,74 @@ function App() {
       .catch(() => setUsage([]));
   }, []);
 
+  const loadHistory = useCallback(() => {
+    sessionApi
+      .history()
+      .then(setHistory)
+      .catch(() => setHistory([]));
+  }, []);
+
+  /** 起一个会话标签（普通起任务 / 自动恢复 / 历史重起共用）。 */
+  const launchInto = useCallback(
+    async (
+      accountId: string,
+      tool: Tool,
+      accountName: string,
+      dir: string,
+      opts: { skipPermissions: boolean; resume: boolean },
+    ) => {
+      const sid = await sessionApi.launch({
+        accountId,
+        projectDir: dir,
+        skipPermissions: opts.skipPermissions,
+        resume: opts.resume,
+        rows: 24,
+        cols: 80,
+      });
+      setSessions((prev) => [
+        ...prev,
+        { id: sid, accountId, accountName, projectDir: dir, tool },
+      ]);
+      setActiveSessionId(sid);
+      loadUsage();
+      loadHistory();
+    },
+    [loadUsage, loadHistory],
+  );
+
   useEffect(() => {
     invoke<string>("app_version")
       .then(setVersion)
       .catch(() => setVersion("offline"));
     loadDefaults();
     loadUsage();
-  }, [loadDefaults, loadUsage]);
+    loadHistory();
+  }, [loadDefaults, loadUsage, loadHistory]);
+
+  // 重启后自动恢复上次打开的会话（账号仍存在时），仅执行一次。
+  useEffect(() => {
+    if (restoredRef.current || accounts.loading) return;
+    restoredRef.current = true;
+    void (async () => {
+      try {
+        const open = await sessionApi.openSessions();
+        for (const s of open) {
+          const acc = accounts.accounts.find((a) => a.id === s.accountId);
+          if (!acc) continue;
+          try {
+            await launchInto(s.accountId, s.tool, acc.name, s.projectDir, {
+              skipPermissions: false,
+              resume: true,
+            });
+          } catch {
+            /* 单个会话恢复失败不影响其他 */
+          }
+        }
+      } catch {
+        /* 无可恢复会话 */
+      }
+    })();
+  }, [accounts.loading, accounts.accounts, launchInto]);
 
   const selected = accounts.accounts.find((a) => a.id === selectedId) ?? null;
   const selectedUsage = usage.find((u) => u.accountId === selectedId) ?? null;
@@ -104,28 +167,15 @@ function App() {
 
   const handleLaunch = async () => {
     if (!launchAccountId || !projectDir) return;
+    const acc = accounts.accounts.find((a) => a.id === launchAccountId);
+    if (!acc) return;
     setLaunching(true);
     setActionError(null);
     try {
-      const sid = await sessionApi.launch({
-        accountId: launchAccountId,
-        projectDir,
+      await launchInto(acc.id, acc.tool, acc.name, projectDir, {
         skipPermissions,
-        rows: 24,
-        cols: 80,
+        resume: false,
       });
-      const acc = accounts.accounts.find((a) => a.id === launchAccountId);
-      setSessions((prev) => [
-        ...prev,
-        {
-          id: sid,
-          accountName: acc?.name ?? "",
-          projectDir,
-          tool: acc?.tool ?? "claude",
-        },
-      ]);
-      setActiveSessionId(sid);
-      loadUsage();
     } catch (e: unknown) {
       setActionError(errorMessage(e));
     } finally {
@@ -134,10 +184,18 @@ function App() {
   };
 
   const handleCloseSession = async (id: string) => {
+    const sess = sessions.find((s) => s.id === id);
     try {
       await sessionApi.close(id);
     } catch {
       /* 关闭失败可忽略 */
+    }
+    if (sess) {
+      try {
+        await sessionApi.markClosed(sess.accountId, sess.projectDir);
+      } catch {
+        /* 忽略 */
+      }
     }
     const next = sessions.filter((s) => s.id !== id);
     setSessions(next);
@@ -145,6 +203,41 @@ function App() {
       setActiveSessionId(next.length ? next[next.length - 1].id : null);
     }
     loadUsage();
+    loadHistory();
+  };
+
+  /** 从历史重起会话（resume 续接对话）；已打开则跳过。 */
+  const handleRestoreSession = async (s: SessionRecord) => {
+    const acc = accounts.accounts.find((a) => a.id === s.accountId);
+    if (!acc) {
+      setActionError("该会话的账号已被删除");
+      return;
+    }
+    if (
+      sessions.some(
+        (t) => t.accountId === s.accountId && t.projectDir === s.projectDir,
+      )
+    ) {
+      return;
+    }
+    setActionError(null);
+    try {
+      await launchInto(acc.id, acc.tool, acc.name, s.projectDir, {
+        skipPermissions: false,
+        resume: true,
+      });
+    } catch (e: unknown) {
+      setActionError(errorMessage(e));
+    }
+  };
+
+  const handleRemoveHistory = async (s: SessionRecord) => {
+    try {
+      await sessionApi.removeHistory(s.accountId, s.projectDir);
+      loadHistory();
+    } catch (e: unknown) {
+      setActionError(errorMessage(e));
+    }
   };
 
   const handleClone = async (account: Account) => {
@@ -338,11 +431,45 @@ function App() {
               <div className="empty-glyph" aria-hidden="true">
                 ⌘
               </div>
-              <p className="empty-title">选择或新建一个账号</p>
+              <p className="empty-title">选择账号起任务，或恢复历史会话</p>
               <p className="empty-hint">
-                左侧管理你的 <strong>Claude Code / Codex</strong> 中转账号；
-                Token 安全存于系统钥匙串，绝不落明文。
+                左侧管理 <strong>Claude Code / Codex</strong> 中转账号；
+                顶部选项目 + 账号点「起任务」开隔离终端。
               </p>
+              {history.length > 0 && (
+                <div className="session-history">
+                  <h3 className="history-title">最近会话</h3>
+                  <ul className="history-list">
+                    {history.slice(0, 8).map((s) => (
+                      <li
+                        key={`${s.accountId}::${s.projectDir}`}
+                        className="history-item"
+                      >
+                        <button
+                          className="history-main"
+                          onClick={() => handleRestoreSession(s)}
+                          title={`重起并续接：${s.projectDir}`}
+                        >
+                          <span
+                            className="account-dot"
+                            data-tool={s.tool}
+                            aria-hidden="true"
+                          />
+                          <span className="history-name">{s.title}</span>
+                          {s.open && <span className="history-badge">上次打开</span>}
+                        </button>
+                        <button
+                          className="history-remove"
+                          onClick={() => handleRemoveHistory(s)}
+                          title="从历史移除"
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </main>

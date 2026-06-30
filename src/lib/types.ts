@@ -47,6 +47,16 @@ export interface AccountError {
   message: string;
 }
 
+/** 持久化的会话记录（与后端 session 模块对应）。 */
+export interface SessionRecord {
+  accountId: string;
+  tool: Tool;
+  projectDir: string;
+  title: string;
+  lastUsedAt: string;
+  open: boolean;
+}
+
 export const TOOL_LABELS: Record<Tool, string> = {
   claude: "Claude Code",
   codex: "Codex",

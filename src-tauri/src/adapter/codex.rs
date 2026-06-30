@@ -108,6 +108,7 @@ mod tests {
     fn skip_permissions_appends_bypass_flag() {
         let opts = LaunchOpts {
             skip_permissions: true,
+            ..Default::default()
         };
         let spec = CodexAdapter.build_session_launch(&account(), "t", Path::new("/p"), &opts);
         assert!(spec
