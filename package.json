@@ -1,7 +1,7 @@
 {
   "name": "account-switcher",
   "private": true,
-  "version": "0.2.4",
+  "version": "0.2.5",
   "type": "module",
   "description": "热切换 Claude Code / Codex 多账号配置的桌面应用",
   "scripts": {
