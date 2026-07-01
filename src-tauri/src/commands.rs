@@ -13,7 +13,7 @@ use crate::config_writer;
 use crate::prefs::PrefsStore;
 use crate::pty::{PtyManager, TauriSink};
 use crate::session::{SessionRecord, SessionStore};
-use crate::usage::{UsageStore, UsageSummary};
+use crate::usage::{TokenUsagePoint, UsageStore, UsageSummary};
 
 // ── 账号 CRUD ───────────────────────────────────────────
 
@@ -259,6 +259,20 @@ pub fn get_defaults(prefs: State<PrefsStore>) -> Defaults {
 #[tauri::command]
 pub fn get_usage_summary(usage: State<UsageStore>) -> Result<Vec<UsageSummary>, String> {
     usage.summary().map_err(|e| e.to_string())
+}
+
+/// 按天 + 账号聚合的 token 用量点位，供用量统计页画图/明细表用。
+/// `start_date`/`end_date` 为 `YYYY-MM-DD`（闭区间），`account_id` 为空则不过滤。
+#[tauri::command]
+pub fn get_token_usage_series(
+    usage: State<UsageStore>,
+    start_date: String,
+    end_date: String,
+    account_id: Option<String>,
+) -> Result<Vec<TokenUsagePoint>, String> {
+    usage
+        .token_usage_series(&start_date, &end_date, account_id.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

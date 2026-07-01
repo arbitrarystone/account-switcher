@@ -85,8 +85,26 @@ export interface UsageSummary {
   lastUsed: string | null;
 }
 
+/** 按天 + 账号聚合的一个 token 用量点位。 */
+export interface TokenUsagePoint {
+  day: string;
+  accountId: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+}
+
 export const usageApi = {
   summary: () => invoke<UsageSummary[]>("get_usage_summary"),
+  /** startDate/endDate 为 `YYYY-MM-DD`（闭区间），accountId 不传则不过滤。 */
+  series: (startDate: string, endDate: string, accountId?: string) =>
+    invoke<TokenUsagePoint[]>("get_token_usage_series", {
+      startDate,
+      endDate,
+      accountId: accountId ?? null,
+    }),
 };
 
 export const memoryApi = {

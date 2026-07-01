@@ -16,6 +16,7 @@ mod config_writer;
 mod prefs;
 mod pty;
 mod session;
+mod token_usage;
 mod usage;
 
 use tauri::Manager;
@@ -50,6 +51,8 @@ pub fn run() {
             // 启动清算：上次异常退出（进程被杀）残留的 running 会话改为 interrupted，
             // 避免永久 running 污染统计。
             let _ = usage.reconcile_orphans();
+            // 后台回填：给这个功能上线前已经跑过的历史会话补齐 token 用量。
+            pty::backfill_token_usage(app.handle().clone(), usage.clone());
             app.manage(usage);
             Ok(())
         })
@@ -69,6 +72,7 @@ pub fn run() {
             commands::clear_default,
             commands::get_defaults,
             commands::get_usage_summary,
+            commands::get_token_usage_series,
             commands::get_last_account,
             commands::get_sessions,
             commands::get_open_sessions,

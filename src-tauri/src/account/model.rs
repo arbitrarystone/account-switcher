@@ -17,6 +17,15 @@ impl Tool {
             Tool::Codex => "codex",
         }
     }
+
+    /// `as_str` 的反向映射——用于从 usage.db 里存的纯文本 `tool` 列还原枚举。
+    pub fn parse(s: &str) -> Option<Tool> {
+        match s {
+            "claude" => Some(Tool::Claude),
+            "codex" => Some(Tool::Codex),
+            _ => None,
+        }
+    }
 }
 
 /// 账号元数据 —— **不含 Token**。Token 单独存系统钥匙串，此处仅留 `token_ref` 引用。
@@ -124,6 +133,13 @@ mod tests {
     fn tool_as_str_maps_correctly() {
         assert_eq!(Tool::Claude.as_str(), "claude");
         assert_eq!(Tool::Codex.as_str(), "codex");
+    }
+
+    #[test]
+    fn tool_parse_round_trips_with_as_str() {
+        assert_eq!(Tool::parse("claude"), Some(Tool::Claude));
+        assert_eq!(Tool::parse("codex"), Some(Tool::Codex));
+        assert_eq!(Tool::parse("unknown"), None);
     }
 
     #[test]

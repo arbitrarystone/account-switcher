@@ -1,7 +1,7 @@
 //! 可插拔工具适配层：为每个工具构造「按会话隔离」的启动规格（不碰全局配置）。
 
 mod claude;
-mod codex;
+pub(crate) mod codex;
 mod env_hygiene;
 
 use std::collections::BTreeMap;

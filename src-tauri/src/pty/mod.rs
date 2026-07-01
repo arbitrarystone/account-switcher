@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
+use crate::account::Tool;
 use crate::adapter::LaunchSpec;
 
 #[derive(Debug, thiserror::Error)]
@@ -74,6 +75,7 @@ impl OutputSink for TauriSink {
     fn exit(&self, session_id: &str, code: i32) {
         let ended_at = chrono::Utc::now().to_rfc3339();
         let _ = self.usage.record_end(session_id, &ended_at, code);
+        record_token_usage_for_session(&self.app, &self.usage, session_id);
         let _ = self.app.emit(
             "pty://exit",
             PtyExit {
@@ -82,6 +84,56 @@ impl OutputSink for TauriSink {
             },
         );
     }
+}
+
+/// 会话结束后反查本地 CLI 日志、记一次 token 用量。找不到账号/工具/项目目录
+/// 匹配的日志时记为「未匹配」（`matched=false`）——不是确认为 0，只是没查到。
+/// 供 [`TauriSink::exit`] 和启动时的历史回填（[`backfill_token_usage`]）共用。
+pub fn record_token_usage_for_session(
+    app: &AppHandle,
+    usage: &crate::usage::UsageStore,
+    session_id: &str,
+) {
+    let Ok(Some(info)) = usage.session_info(session_id) else {
+        return;
+    };
+    let Some(tool) = Tool::parse(&info.tool) else {
+        return;
+    };
+    let Ok(home_dir) = app.path().home_dir() else {
+        return;
+    };
+    let counts = crate::token_usage::scan(
+        tool,
+        &home_dir,
+        std::path::Path::new(&info.project_dir),
+        &info.started_at,
+        &info.ended_at,
+    );
+    let _ = match counts {
+        Some(c) => usage.record_token_usage(
+            session_id,
+            c.input_tokens,
+            c.output_tokens,
+            c.cache_read_tokens,
+            c.cache_write_tokens,
+            true,
+        ),
+        None => usage.record_token_usage(session_id, 0, 0, 0, 0, false),
+    };
+}
+
+/// 启动时一次性回填：给这个功能上线前已经跑过的历史会话补齐 token_usage，
+/// 让用量页面一打开就有历史数据可看。在后台线程跑，不阻塞启动。
+pub fn backfill_token_usage(app: AppHandle, usage: crate::usage::UsageStore) {
+    std::thread::spawn(move || {
+        let Ok(missing) = usage.sessions_missing_token_usage() else {
+            return;
+        };
+        for info in missing {
+            record_token_usage_for_session(&app, &usage, &info.session_id);
+        }
+    });
 }
 
 struct Session {

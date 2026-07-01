@@ -5,7 +5,9 @@ use super::{LaunchOpts, LaunchSpec, ToolAdapter};
 use crate::account::Account;
 
 /// 会话内 provider 标识与 token 环境变量名（按会话隔离，进程间不共享，固定名即可）。
-const PROVIDER_ID: &str = "accsw";
+/// `pub(crate)` 供 token_usage::codex_transcripts 复用，作为反查本地 rollout 日志时
+/// 匹配 `session_meta.model_provider` 的关键字——两处必须保持同一个值。
+pub(crate) const PROVIDER_ID: &str = "accsw";
 const TOKEN_ENV: &str = "ACCSW_CODEX_TOKEN";
 
 /// Codex 适配器：用 `-c` 内联覆盖**新建** provider + token env，

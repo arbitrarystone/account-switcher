@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -7,6 +7,9 @@ import AccountSidebar from "./components/account-sidebar/AccountSidebar";
 import EyeToggle from "./components/ui/EyeToggle";
 import TerminalTabs, { type TerminalSession } from "./components/terminal-tabs/TerminalTabs";
 import UpdateChecker from "./components/updater/UpdateChecker";
+
+// recharts 体积不小，懒加载：只有真的点进用量统计页才拉取，不拖慢启动。
+const UsageDashboard = lazy(() => import("./components/usage-dashboard/UsageDashboard"));
 import { useAccounts } from "./hooks/useAccounts";
 import {
   defaultsApi,
@@ -40,6 +43,7 @@ function App() {
   const [showDetailToken, setShowDetailToken] = useState(false);
   const [usage, setUsage] = useState<UsageSummary[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [view, setView] = useState<"workbench" | "usage">("workbench");
 
   // 起任务条 + 多会话
   const [projectDir, setProjectDir] = useState("");
@@ -297,7 +301,7 @@ function App() {
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">Account Switcher</span>
         </div>
-        <div className="launch-fields">
+        {view === "workbench" && <div className="launch-fields">
           <label className="field">
             <span className="field-label">项目目录</span>
             <div className="field-input-row">
@@ -345,10 +349,21 @@ function App() {
           <button className="btn btn-primary" onClick={handleLaunch} disabled={!canLaunch}>
             {launching ? "起任务中…" : "起任务"}
           </button>
-        </div>
+        </div>}
+        <button
+          className="btn btn-ghost btn-sm nav-usage-btn"
+          onClick={() => setView((v) => (v === "usage" ? "workbench" : "usage"))}
+        >
+          {view === "usage" ? "返回工作台" : "用量统计"}
+        </button>
       </header>
 
-      {/* ── 工作区：账号侧栏 + 终端/详情区 ──────────────── */}
+      {view === "usage" ? (
+        <Suspense fallback={<div className="usage-empty">加载用量统计…</div>}>
+          <UsageDashboard accounts={accounts.accounts} onClose={() => setView("workbench")} />
+        </Suspense>
+      ) : (
+      /* ── 工作区：账号侧栏 + 终端/详情区 ──────────────── */
       <div className={"workbench" + (sidebarCollapsed ? " sidebar-collapsed" : "")}>
         <AccountSidebar
           accounts={accounts.accounts}
@@ -475,6 +490,7 @@ function App() {
           )}
         </main>
       </div>
+      )}
 
       {/* ── 底部：状态栏 ─────────────────────────────── */}
       <footer className="status-bar">

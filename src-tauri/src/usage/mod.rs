@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +26,30 @@ pub struct UsageSummary {
     pub last_used: Option<String>,
 }
 
+/// 一次会话的完整上下文——反查本地 CLI 日志、按天聚合 token 用量都要用到。
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageSessionInfo {
+    pub session_id: String,
+    pub account_id: String,
+    pub tool: String,
+    pub project_dir: String,
+    pub started_at: String,
+    pub ended_at: String,
+}
+
+/// 按天 + 按账号聚合后的 token 用量点位，供前端画图/明细表用。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsagePoint {
+    pub day: String,
+    pub account_id: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub total_tokens: i64,
+}
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS usage (
     session_id   TEXT PRIMARY KEY,
@@ -37,6 +61,14 @@ CREATE TABLE IF NOT EXISTS usage (
     duration_sec INTEGER,
     status       TEXT NOT NULL,
     exit_code    INTEGER
+);
+CREATE TABLE IF NOT EXISTS token_usage (
+    session_id         TEXT PRIMARY KEY REFERENCES usage(session_id),
+    input_tokens        INTEGER NOT NULL DEFAULT 0,
+    output_tokens       INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens    INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens   INTEGER NOT NULL DEFAULT 0,
+    matched              INTEGER NOT NULL DEFAULT 0
 );";
 
 /// SQLite 用量库，内部 Arc<Mutex<Connection>> 以便跨线程克隆共享。
@@ -112,6 +144,130 @@ impl UsageStore {
                     sessions: r.get(1)?,
                     total_duration_sec: r.get(2)?,
                     last_used: r.get(3)?,
+                })
+            })
+            .map_err(|e| UsageError::Db(e.to_string()))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| UsageError::Db(e.to_string()))
+    }
+
+    /// 取一次会话的完整上下文（account_id/tool/project_dir/时间窗），
+    /// 供反查本地 CLI 日志时定位要扫哪个目录、哪个时间窗。
+    /// 会话仍在 running（ended_at 为空）时返回 `Ok(None)`——此时还不知道时间窗终点，扫不了。
+    pub fn session_info(&self, session_id: &str) -> Result<Option<UsageSessionInfo>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT session_id, account_id, tool, project_dir, started_at, ended_at \
+             FROM usage WHERE session_id = ?1 AND ended_at IS NOT NULL",
+            [session_id],
+            |r| {
+                Ok(UsageSessionInfo {
+                    session_id: r.get(0)?,
+                    account_id: r.get(1)?,
+                    tool: r.get(2)?,
+                    project_dir: r.get(3)?,
+                    started_at: r.get(4)?,
+                    ended_at: r.get(5)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| UsageError::Db(e.to_string()))
+    }
+
+    /// 已结束但还没有 token_usage 记录的会话（新功能上线前跑过的历史会话）——
+    /// 供启动时后台回填扫描用。
+    pub fn sessions_missing_token_usage(&self) -> Result<Vec<UsageSessionInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT u.session_id, u.account_id, u.tool, u.project_dir, u.started_at, u.ended_at \
+                 FROM usage u LEFT JOIN token_usage t ON t.session_id = u.session_id \
+                 WHERE u.ended_at IS NOT NULL AND t.session_id IS NULL",
+            )
+            .map_err(|e| UsageError::Db(e.to_string()))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(UsageSessionInfo {
+                    session_id: r.get(0)?,
+                    account_id: r.get(1)?,
+                    tool: r.get(2)?,
+                    project_dir: r.get(3)?,
+                    started_at: r.get(4)?,
+                    ended_at: r.get(5)?,
+                })
+            })
+            .map_err(|e| UsageError::Db(e.to_string()))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| UsageError::Db(e.to_string()))
+    }
+
+    /// 记一次会话的 token 用量。`matched = false` 表示没能在本地日志里关联到
+    /// （目录不存在/中转未返回标准 usage 字段等），四个数值也会是 0——
+    /// 前端应展示成「未匹配」而非「确认为 0」。
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_token_usage(
+        &self,
+        session_id: &str,
+        input_tokens: i64,
+        output_tokens: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+        matched: bool,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO token_usage \
+             (session_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, matched) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                session_id,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                matched as i64
+            ],
+        )
+        .map_err(|e| UsageError::Db(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 按天 + 账号聚合 token 用量，`start_date`/`end_date` 为 `YYYY-MM-DD`（闭区间）。
+    /// `account_id` 为 `None` 时不过滤，返回全部账号。
+    pub fn token_usage_series(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        account_id: Option<&str>,
+    ) -> Result<Vec<TokenUsagePoint>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT substr(u.started_at, 1, 10) AS day, u.account_id, \
+                        COALESCE(SUM(t.input_tokens), 0), COALESCE(SUM(t.output_tokens), 0), \
+                        COALESCE(SUM(t.cache_read_tokens), 0), COALESCE(SUM(t.cache_write_tokens), 0) \
+                 FROM usage u LEFT JOIN token_usage t ON t.session_id = u.session_id \
+                 WHERE substr(u.started_at, 1, 10) >= ?1 AND substr(u.started_at, 1, 10) <= ?2 \
+                   AND (?3 IS NULL OR u.account_id = ?3) \
+                 GROUP BY day, u.account_id \
+                 ORDER BY day ASC",
+            )
+            .map_err(|e| UsageError::Db(e.to_string()))?;
+        let rows = stmt
+            .query_map(rusqlite::params![start_date, end_date, account_id], |r| {
+                let input: i64 = r.get(2)?;
+                let output: i64 = r.get(3)?;
+                let cache_read: i64 = r.get(4)?;
+                let cache_write: i64 = r.get(5)?;
+                Ok(TokenUsagePoint {
+                    day: r.get(0)?,
+                    account_id: r.get(1)?,
+                    input_tokens: input,
+                    output_tokens: output,
+                    cache_read_tokens: cache_read,
+                    cache_write_tokens: cache_write,
+                    total_tokens: input + output + cache_read + cache_write,
                 })
             })
             .map_err(|e| UsageError::Db(e.to_string()))?;
@@ -249,5 +405,88 @@ mod tests {
         let sum = s.summary().unwrap();
         assert_eq!(sum[0].sessions, 1);
         assert_eq!(sum[0].total_duration_sec, 0);
+    }
+
+    #[test]
+    fn session_info_returns_none_while_running() {
+        let s = store();
+        s.record_start("s1", "acc1", "claude", "/p", "2026-06-30T00:00:00Z")
+            .unwrap();
+        assert_eq!(s.session_info("s1").unwrap(), None, "还没结束，时间窗终点未知");
+        s.record_end("s1", "2026-06-30T00:01:00Z", 0).unwrap();
+        let info = s.session_info("s1").unwrap().expect("已结束应能取到");
+        assert_eq!(info.account_id, "acc1");
+        assert_eq!(info.project_dir, "/p");
+        assert_eq!(info.ended_at, "2026-06-30T00:01:00Z");
+    }
+
+    #[test]
+    fn sessions_missing_token_usage_excludes_running_and_recorded() {
+        let s = store();
+        s.record_start("s1", "acc1", "claude", "/p", "2026-06-30T00:00:00Z")
+            .unwrap();
+        s.record_end("s1", "2026-06-30T00:01:00Z", 0).unwrap();
+        s.record_start("s2", "acc1", "claude", "/p", "2026-06-30T01:00:00Z")
+            .unwrap();
+        s.record_end("s2", "2026-06-30T01:01:00Z", 0).unwrap();
+        s.record_token_usage("s2", 10, 5, 0, 0, true).unwrap();
+        // s3 仍 running，不该被当成「缺失」拿去扫（时间窗终点未知）
+        s.record_start("s3", "acc1", "claude", "/p", "2026-06-30T02:00:00Z")
+            .unwrap();
+
+        let missing = s.sessions_missing_token_usage().unwrap();
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].session_id, "s1");
+    }
+
+    #[test]
+    fn token_usage_series_aggregates_by_day_and_account() {
+        let s = store();
+        s.record_start("s1", "acc1", "claude", "/p", "2026-06-30T00:00:00Z")
+            .unwrap();
+        s.record_end("s1", "2026-06-30T00:01:00Z", 0).unwrap();
+        s.record_token_usage("s1", 100, 10, 5, 0, true).unwrap();
+
+        s.record_start("s2", "acc1", "claude", "/p", "2026-06-30T05:00:00Z")
+            .unwrap();
+        s.record_end("s2", "2026-06-30T05:01:00Z", 0).unwrap();
+        s.record_token_usage("s2", 50, 5, 0, 0, true).unwrap();
+
+        s.record_start("s3", "acc2", "claude", "/p", "2026-06-30T00:00:00Z")
+            .unwrap();
+        s.record_end("s3", "2026-06-30T00:01:00Z", 0).unwrap();
+        s.record_token_usage("s3", 7, 1, 0, 0, true).unwrap();
+
+        // 同一天 acc1 的两个 session 应合并成一行
+        let all = s
+            .token_usage_series("2026-06-30", "2026-06-30", None)
+            .unwrap();
+        assert_eq!(all.len(), 2, "按天+账号分组：acc1 一行、acc2 一行");
+        let acc1 = all.iter().find(|p| p.account_id == "acc1").unwrap();
+        assert_eq!(acc1.input_tokens, 150);
+        assert_eq!(acc1.output_tokens, 15);
+        assert_eq!(acc1.cache_read_tokens, 5);
+        assert_eq!(acc1.total_tokens, 170);
+
+        let filtered = s
+            .token_usage_series("2026-06-30", "2026-06-30", Some("acc2"))
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].account_id, "acc2");
+        assert_eq!(filtered[0].total_tokens, 8);
+    }
+
+    #[test]
+    fn token_usage_series_excludes_out_of_range_days() {
+        let s = store();
+        s.record_start("s1", "acc1", "claude", "/p", "2026-06-29T00:00:00Z")
+            .unwrap();
+        s.record_end("s1", "2026-06-29T00:01:00Z", 0).unwrap();
+        s.record_token_usage("s1", 100, 0, 0, 0, true).unwrap();
+
+        let series = s
+            .token_usage_series("2026-06-30", "2026-07-01", None)
+            .unwrap();
+        assert!(series.is_empty(), "范围外的会话不该出现");
     }
 }
