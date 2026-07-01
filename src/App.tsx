@@ -17,6 +17,7 @@ import {
   type ToolDefaults,
   type UsageSummary,
 } from "./lib/api";
+import { formatDuration } from "./lib/format";
 import type { Account, SessionRecord, Tool } from "./lib/types";
 import { TOOL_LABELS } from "./lib/types";
 
@@ -26,16 +27,6 @@ interface DialogState {
 }
 
 const EMPTY_DEFAULTS: ToolDefaults = { claude: null, codex: null };
-
-/** 秒 → 友好时长。 */
-function formatDuration(sec: number): string {
-  if (sec <= 0) return "0 秒";
-  if (sec < 60) return `${sec} 秒`;
-  const m = Math.floor(sec / 60);
-  if (m < 60) return `${m} 分钟`;
-  const h = Math.floor(m / 60);
-  return `${h} 小时 ${m % 60} 分`;
-}
 
 function App() {
   const accounts = useAccounts();
@@ -145,6 +136,8 @@ function App() {
 
   const selected = accounts.accounts.find((a) => a.id === selectedId) ?? null;
   const selectedUsage = usage.find((u) => u.accountId === selectedId) ?? null;
+  const usageByAccount = new Map(usage.map((u) => [u.accountId, u]));
+  const runningAccountIds = new Set(sessions.map((s) => s.accountId));
   const banner = actionError ?? accounts.error;
   const canLaunch = Boolean(projectDir && launchAccountId && !launching);
 
@@ -362,6 +355,8 @@ function App() {
           loading={accounts.loading}
           selectedId={selectedId}
           defaults={defaults}
+          usageByAccount={usageByAccount}
+          runningAccountIds={runningAccountIds}
           onSelect={setSelectedId}
           onAdd={() => setDialog({ mode: "create", initial: null })}
           onEdit={(a) => setDialog({ mode: "edit", initial: a })}

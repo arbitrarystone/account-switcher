@@ -1,4 +1,5 @@
-import type { ToolDefaults } from "../../lib/api";
+import type { ToolDefaults, UsageSummary } from "../../lib/api";
+import { formatDuration } from "../../lib/format";
 import type { Account, Tool } from "../../lib/types";
 import { TOOL_LABELS } from "../../lib/types";
 
@@ -7,6 +8,8 @@ interface AccountSidebarProps {
   loading: boolean;
   selectedId: string | null;
   defaults: ToolDefaults;
+  usageByAccount: Map<string, UsageSummary>;
+  runningAccountIds: Set<string>;
   onSelect: (id: string) => void;
   onAdd: () => void;
   onEdit: (account: Account) => void;
@@ -23,6 +26,8 @@ function AccountSidebar({
   loading,
   selectedId,
   defaults,
+  usageByAccount,
+  runningAccountIds,
   onSelect,
   onAdd,
   onEdit,
@@ -58,6 +63,8 @@ function AccountSidebar({
                 <h3 className="group-label">{TOOL_LABELS[tool]}</h3>
                 {group.map((account) => {
                   const isDefault = defaults[account.tool] === account.id;
+                  const isRunning = runningAccountIds.has(account.id);
+                  const u = usageByAccount.get(account.id);
                   return (
                     <div
                       key={account.id}
@@ -70,8 +77,19 @@ function AccountSidebar({
                         data-tool={account.tool}
                         aria-hidden="true"
                       />
-                      <span className="account-name" title={account.baseUrl}>
-                        {account.name}
+                      <span className="account-main">
+                        <span className="account-name" title={account.baseUrl}>
+                          {account.name}
+                        </span>
+                        <span className="account-usage">
+                          {isRunning && (
+                            <span className="usage-live" aria-hidden="true" />
+                          )}
+                          {isRunning && "运行中 · "}
+                          {u && u.sessions > 0
+                            ? `${u.sessions} 次 · 累计 ${formatDuration(u.totalDurationSec)}`
+                            : "尚未使用"}
+                        </span>
                       </span>
                       {isDefault && (
                         <span className="account-default" title="全局默认">
