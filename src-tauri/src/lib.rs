@@ -46,7 +46,11 @@ pub fn run() {
             app.manage(PtyManager::default());
             app.manage(PrefsStore::load(config_dir.join("prefs.json")));
             app.manage(SessionStore::load(config_dir.join("sessions.json")));
-            app.manage(UsageStore::open(&config_dir.join("usage.db"))?);
+            let usage = UsageStore::open(&config_dir.join("usage.db"))?;
+            // 启动清算：上次异常退出（进程被杀）残留的 running 会话改为 interrupted，
+            // 避免永久 running 污染统计。
+            let _ = usage.reconcile_orphans();
+            app.manage(usage);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -71,6 +75,15 @@ pub fn run() {
             commands::session_closed,
             commands::remove_session,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 退出时结算所有仍 running 的会话，捕获其用量时长
+            // （否则等待线程随进程终止被杀，record_end 永不触发）。
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                if let Some(usage) = app_handle.try_state::<UsageStore>() {
+                    let _ = usage.end_running_sessions(&chrono::Utc::now().to_rfc3339());
+                }
+            }
+        });
 }

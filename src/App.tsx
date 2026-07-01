@@ -398,15 +398,21 @@ function App() {
                 <dd>{selected.model ?? "—"}</dd>
                 <dt>Token</dt>
                 <dd className="token-reveal">
-                  <span className="detail-mono">
-                    {showDetailToken
-                      ? selected.token || "（未设置，请编辑账号填入）"
-                      : "••••••••••••"}
-                  </span>
-                  <EyeToggle
-                    shown={showDetailToken}
-                    onToggle={() => setShowDetailToken((s) => !s)}
-                  />
+                  {selected.token ? (
+                    <>
+                      <span className="detail-mono">
+                        {showDetailToken ? selected.token : "••••••••••••"}
+                      </span>
+                      <EyeToggle
+                        shown={showDetailToken}
+                        onToggle={() => setShowDetailToken((s) => !s)}
+                      />
+                    </>
+                  ) : (
+                    <span className="token-missing">
+                      ⚠ 未设置 —— 请编辑账号填入 Token（否则起任务无法使用该账号）
+                    </span>
+                  )}
                 </dd>
                 <dt>标签</dt>
                 <dd>{selected.tags?.length ? selected.tags.join("、") : "—"}</dd>

@@ -80,6 +80,14 @@ pub fn launch_session(
 ) -> Result<String, String> {
     let account = service.get(&account_id).map_err(|e| e.to_string())?;
     let token = service.get_token(&account_id).map_err(|e| e.to_string())?;
+    // 空 Token 拦截：否则注入 ANTHROPIC_AUTH_TOKEN="" 会静默落到全局配置的 key，
+    // 表现为「切了账号却没换 token」。旧钥匙串账号迁明文后 token 为空，需重新填入。
+    if token.trim().is_empty() {
+        return Err(format!(
+            "账号「{}」的 Token 为空，请先编辑该账号填入 Token 再起任务。",
+            account.name
+        ));
+    }
     let opts = LaunchOpts {
         skip_permissions,
         resume,

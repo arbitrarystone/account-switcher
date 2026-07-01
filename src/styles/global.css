@@ -663,6 +663,12 @@ select {
   box-shadow: 0 0 6px oklch(76% 0.14 150 / 0.6);
 }
 
+/* ── 账号缺 Token 警示 ──────────────────────────── */
+.token-missing {
+  color: var(--warn);
+  font-size: var(--text-sm);
+}
+
 /* ── 检查更新 ───────────────────────────────────── */
 .update-check-btn {
   display: inline-flex;
