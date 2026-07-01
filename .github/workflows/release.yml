@@ -1,0 +1,61 @@
+name: release
+
+# 推 v* tag 触发：构建 universal（Intel + Apple Silicon）macOS 包，
+# 用 updater 私钥签名，生成并上传 latest.json 到 GitHub Release，
+# app 内「检查更新」即从该 Release 拉取。
+#
+# 需在仓库 Settings → Secrets and variables → Actions 配置：
+#   TAURI_SIGNING_PRIVATE_KEY          —— `tauri signer generate` 产出的私钥内容
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD —— 私钥密码（生成时未设则留空）
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust (universal targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build & publish (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Account Switcher ${{ github.ref_name }}"
+          releaseBody: "查看下方资源下载安装；应用内「检查更新」将自动获取此版本。"
+          releaseDraft: false
+          prerelease: false
+          args: --target universal-apple-darwin

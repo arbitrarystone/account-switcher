@@ -104,7 +104,14 @@ pub fn launch_session(
         .map_err(|e| e.to_string())?;
     let _ = prefs.set_last(&project_dir, account.tool, &account_id);
     let title = format!("{} · {}", account.name, project_basename(&project_dir));
-    let _ = session.record_open(&account_id, account.tool, &project_dir, &title, &started_at);
+    let _ = session.record_open(
+        &account_id,
+        account.tool,
+        &project_dir,
+        &title,
+        skip_permissions,
+        &started_at,
+    );
 
     let sink = Arc::new(TauriSink::new(app, (*usage).clone()));
     pty.spawn(sink, session_id.clone(), spec, rows, cols)

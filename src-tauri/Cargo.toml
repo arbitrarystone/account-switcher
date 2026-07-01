@@ -26,6 +26,9 @@ chrono = { version = "0.4", features = ["serde"] }
 portable-pty = "0.9"
 # 原生对话框（项目目录选择）
 tauri-plugin-dialog = "2"
+# 应用内检查更新（下载 / 安装签名产物）+ 安装后重启
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 # TOML 读写（Codex 全局配置）
 toml = "0.8"
 # 用量统计本地库

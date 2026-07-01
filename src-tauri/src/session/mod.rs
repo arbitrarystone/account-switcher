@@ -25,6 +25,9 @@ pub struct SessionRecord {
     /// 上次关闭 app 时该会话是否处于打开状态（用于重启自动恢复）。
     #[serde(default)]
     pub open: bool,
+    /// 起任务时是否跳过权限确认（恢复 / 重起会话时按此值重放）。
+    #[serde(default)]
+    pub skip_permissions: bool,
 }
 
 fn key(account_id: &str, project_dir: &str) -> String {
@@ -68,12 +71,14 @@ impl SessionStore {
     }
 
     /// 起任务：按 (account_id, project_dir) upsert 会话并标记打开。
+    #[allow(clippy::too_many_arguments)]
     pub fn record_open(
         &self,
         account_id: &str,
         tool: Tool,
         project_dir: &str,
         title: &str,
+        skip_permissions: bool,
         now: &str,
     ) -> Result<(), String> {
         let mut all = self.cache.lock().unwrap();
@@ -86,6 +91,7 @@ impl SessionStore {
             rec.title = title.to_string();
             rec.tool = tool;
             rec.open = true;
+            rec.skip_permissions = skip_permissions;
         } else {
             all.push(SessionRecord {
                 account_id: account_id.to_string(),
@@ -94,6 +100,7 @@ impl SessionStore {
                 title: title.to_string(),
                 last_used_at: now.to_string(),
                 open: true,
+                skip_permissions,
             });
         }
         persist(&self.path, &all)
@@ -149,15 +156,19 @@ mod tests {
         let path = dir.path().join("sessions.json");
         let store = SessionStore::load(path.clone());
         store
-            .record_open("a1", Tool::Claude, "/p", "A · p", "2026-06-30T00:00:00Z")
+            .record_open("a1", Tool::Claude, "/p", "A · p", false, "2026-06-30T00:00:00Z")
             .unwrap();
         store
-            .record_open("a1", Tool::Claude, "/p", "A · p", "2026-06-30T01:00:00Z")
+            .record_open("a1", Tool::Claude, "/p", "A · p", true, "2026-06-30T01:00:00Z")
             .unwrap();
 
         let reloaded = SessionStore::load(path);
         assert_eq!(reloaded.list().len(), 1, "同 key 应 upsert 不重复");
         assert_eq!(reloaded.list()[0].last_used_at, "2026-06-30T01:00:00Z");
+        assert!(
+            reloaded.list()[0].skip_permissions,
+            "upsert 应更新 skip_permissions"
+        );
         assert_eq!(reloaded.open_sessions().len(), 1);
     }
 
@@ -166,7 +177,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = SessionStore::load(dir.path().join("sessions.json"));
         store
-            .record_open("a1", Tool::Codex, "/p", "t", "2026-06-30T00:00:00Z")
+            .record_open("a1", Tool::Codex, "/p", "t", false, "2026-06-30T00:00:00Z")
             .unwrap();
         store.mark_closed("a1", "/p").unwrap();
         assert_eq!(store.list().len(), 1, "历史保留");
@@ -178,7 +189,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = SessionStore::load(dir.path().join("sessions.json"));
         store
-            .record_open("a1", Tool::Claude, "/p", "t", "2026-06-30T00:00:00Z")
+            .record_open("a1", Tool::Claude, "/p", "t", false, "2026-06-30T00:00:00Z")
             .unwrap();
         store.remove("a1", "/p").unwrap();
         assert!(store.list().is_empty());

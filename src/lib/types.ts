@@ -55,6 +55,8 @@ export interface SessionRecord {
   title: string;
   lastUsedAt: string;
   open: boolean;
+  /** 起任务时是否跳过权限确认（恢复 / 重起时按此重放）。 */
+  skipPermissions: boolean;
 }
 
 export const TOOL_LABELS: Record<Tool, string> = {

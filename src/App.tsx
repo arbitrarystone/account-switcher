@@ -6,6 +6,7 @@ import AccountFormDialog from "./components/account-sidebar/AccountFormDialog";
 import AccountSidebar from "./components/account-sidebar/AccountSidebar";
 import EyeToggle from "./components/ui/EyeToggle";
 import TerminalTabs, { type TerminalSession } from "./components/terminal-tabs/TerminalTabs";
+import UpdateChecker from "./components/updater/UpdateChecker";
 import { useAccounts } from "./hooks/useAccounts";
 import {
   defaultsApi,
@@ -129,7 +130,7 @@ function App() {
           if (!acc) continue;
           try {
             await launchInto(s.accountId, s.tool, acc.name, s.projectDir, {
-              skipPermissions: false,
+              skipPermissions: s.skipPermissions,
               resume: true,
             });
           } catch {
@@ -224,7 +225,7 @@ function App() {
     setActionError(null);
     try {
       await launchInto(acc.id, acc.tool, acc.name, s.projectDir, {
-        skipPermissions: false,
+        skipPermissions: s.skipPermissions,
         resume: true,
       });
     } catch (e: unknown) {
@@ -490,6 +491,7 @@ function App() {
           </span>
         )}
         <span className="status-spacer" />
+        <UpdateChecker currentVersion={version} />
         <span className="status-item status-muted">v{version}</span>
       </footer>
 

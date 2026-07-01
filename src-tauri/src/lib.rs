@@ -36,6 +36,8 @@ fn app_version() -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // 账号元数据（含明文 Token）/ 偏好 / 用量库存于应用配置目录。
             let config_dir = app.path().app_config_dir()?;
