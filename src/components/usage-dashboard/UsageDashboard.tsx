@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -23,6 +25,47 @@ const PRESET_LABELS: Record<RangePreset, string> = {
   "30d": "近 30 天",
   custom: "自定义",
 };
+
+type ChartType = "area" | "bar";
+
+const CHART_TYPE_LABELS: Record<ChartType, string> = {
+  area: "曲线图",
+  bar: "柱状图",
+};
+
+/** 渐变 id 只允许安全字符，账号 id 里可能有别的符号，先洗一遍。 */
+function gradientId(accountId: string): string {
+  return `usage-grad-${accountId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+/** 柱状图 / 曲线图共用的坐标轴与提示框配置。 */
+const X_AXIS_PROPS = {
+  dataKey: "day",
+  tickFormatter: (v: unknown) => formatDayLabel(String(v)),
+  stroke: "var(--text-faint)",
+  fontSize: 12,
+  tickLine: false,
+} as const;
+
+const Y_AXIS_PROPS = {
+  tickFormatter: (v: unknown) => formatTokenCount(Number(v)),
+  stroke: "var(--text-faint)",
+  fontSize: 12,
+  tickLine: false,
+  axisLine: false,
+  width: 48,
+} as const;
+
+const TOOLTIP_PROPS = {
+  formatter: (value: unknown) =>
+    typeof value === "number" ? formatTokenCount(value) : String(value),
+  contentStyle: {
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    fontSize: "var(--text-sm)",
+  },
+} as const;
 
 /** 按账号循环取色，不够时从头复用。 */
 const PALETTE = [
@@ -110,6 +153,7 @@ function UsageDashboard({ accounts, onClose }: UsageDashboardProps) {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  const [chartType, setChartType] = useState<ChartType>("area");
 
   const { startDate, endDate } = useMemo(
     () => computeRange(preset, customStart, customEnd),
@@ -165,6 +209,19 @@ function UsageDashboard({ accounts, onClose }: UsageDashboardProps) {
                   onClick={() => setPreset(p)}
                 >
                   {PRESET_LABELS[p]}
+                </button>
+              ))}
+            </div>
+            <div className="usage-range-tabs" role="tablist" aria-label="图表类型">
+              {(Object.keys(CHART_TYPE_LABELS) as ChartType[]).map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={chartType === t}
+                  className="usage-range-tab"
+                  onClick={() => setChartType(t)}
+                >
+                  {CHART_TYPE_LABELS[t]}
                 </button>
               ))}
             </div>
@@ -258,46 +315,70 @@ function UsageDashboard({ accounts, onClose }: UsageDashboardProps) {
 
               <div className="usage-chart">
                 <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={dayRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                    <XAxis
-                      dataKey="day"
-                      tickFormatter={(v) => formatDayLabel(String(v))}
-                      stroke="var(--text-faint)"
-                      fontSize={12}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tickFormatter={(v) => formatTokenCount(Number(v))}
-                      stroke="var(--text-faint)"
-                      fontSize={12}
-                      tickLine={false}
-                      axisLine={false}
-                      width={48}
-                    />
-                    <Tooltip
-                      formatter={(value) =>
-                        typeof value === "number" ? formatTokenCount(value) : String(value)
-                      }
-                      contentStyle={{
-                        background: "var(--bg-elevated)",
-                        border: "1px solid var(--border)",
-                        borderRadius: "var(--radius-sm)",
-                        fontSize: "var(--text-sm)",
-                      }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: "var(--text-xs)" }} />
-                    {visibleAccounts.map((a) => (
-                      <Bar
-                        key={a.id}
-                        dataKey={a.id}
-                        name={a.name}
-                        stackId="tokens"
-                        fill={colorFor(a.id)}
-                        radius={2}
+                  {chartType === "bar" ? (
+                    <BarChart data={dayRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="var(--border)"
+                        vertical={false}
                       />
-                    ))}
-                  </BarChart>
+                      <XAxis {...X_AXIS_PROPS} />
+                      <YAxis {...Y_AXIS_PROPS} />
+                      <Tooltip {...TOOLTIP_PROPS} />
+                      <Legend wrapperStyle={{ fontSize: "var(--text-xs)" }} />
+                      {visibleAccounts.map((a) => (
+                        <Bar
+                          key={a.id}
+                          dataKey={a.id}
+                          name={a.name}
+                          stackId="tokens"
+                          fill={colorFor(a.id)}
+                          radius={2}
+                        />
+                      ))}
+                    </BarChart>
+                  ) : (
+                    <AreaChart data={dayRows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        {visibleAccounts.map((a) => (
+                          <linearGradient
+                            key={a.id}
+                            id={gradientId(a.id)}
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop offset="0%" stopColor={colorFor(a.id)} stopOpacity={0.45} />
+                            <stop offset="100%" stopColor={colorFor(a.id)} stopOpacity={0.04} />
+                          </linearGradient>
+                        ))}
+                      </defs>
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="var(--border)"
+                        vertical={false}
+                      />
+                      <XAxis {...X_AXIS_PROPS} />
+                      <YAxis {...Y_AXIS_PROPS} />
+                      <Tooltip {...TOOLTIP_PROPS} />
+                      <Legend wrapperStyle={{ fontSize: "var(--text-xs)" }} />
+                      {visibleAccounts.map((a) => (
+                        <Area
+                          key={a.id}
+                          type="monotone"
+                          dataKey={a.id}
+                          name={a.name}
+                          stackId="tokens"
+                          stroke={colorFor(a.id)}
+                          strokeWidth={2}
+                          fill={`url(#${gradientId(a.id)})`}
+                          dot={false}
+                          activeDot={{ r: 3.5, strokeWidth: 0 }}
+                        />
+                      ))}
+                    </AreaChart>
+                  )}
                 </ResponsiveContainer>
               </div>
 
