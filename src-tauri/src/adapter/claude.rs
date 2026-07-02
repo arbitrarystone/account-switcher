@@ -15,6 +15,13 @@ pub struct ClaudeAdapter;
 /// 导致「切了账号却仍按全局默认账号扣量」。`--settings` 覆盖优先级高于
 /// settings.json 与继承的进程 env（已实测验证），故在此显式清空 API_KEY 并
 /// 复述本会话的 BASE_URL/AUTH_TOKEN，双保险覆盖任何全局残留。
+///
+/// `apiKeyHelper` 同理必须清空：它是 settings.json 里的一条 shell 命令，
+/// claude 每次请求都会执行它取 key 填进 `x-api-key` 头——若全局残留了
+/// 某账号的 helper（如 `echo '<某账号key>'`），所有会话（无论注入哪个
+/// AUTH_TOKEN）都会同时带上该账号的 key 被中转优先计费，表现为
+/// 「切了账号仍按旧账号扣量」。空串覆盖实测可让 x-api-key 完全消失，
+/// 且在全局本无 helper 时也无副作用。
 fn settings_override(account: &Account, token: &str) -> String {
     let mut env = serde_json::Map::new();
     env.insert("ANTHROPIC_BASE_URL".into(), json!(account.base_url));
@@ -23,7 +30,7 @@ fn settings_override(account: &Account, token: &str) -> String {
     if let Some(model) = &account.model {
         env.insert("ANTHROPIC_MODEL".into(), json!(model));
     }
-    json!({ "env": env }).to_string()
+    json!({ "env": env, "apiKeyHelper": "" }).to_string()
 }
 
 impl ToolAdapter for ClaudeAdapter {
@@ -126,6 +133,21 @@ mod tests {
         assert_eq!(payload["env"]["ANTHROPIC_AUTH_TOKEN"], "sk-tok");
         assert_eq!(payload["env"]["ANTHROPIC_API_KEY"], "");
         assert_eq!(payload["env"]["ANTHROPIC_MODEL"], "claude-opus-4");
+    }
+
+    #[test]
+    fn settings_override_blanks_api_key_helper() {
+        // 实测：全局 settings.json 里残留的 apiKeyHelper（一条 shell 命令）会在
+        // 每次请求时被执行、其输出作为 x-api-key 头发出并被中转优先采信——
+        // 即使本会话注入了另一账号的 AUTH_TOKEN。必须显式空串覆盖。
+        let spec = ClaudeAdapter.build_session_launch(
+            &account(),
+            "sk-tok",
+            Path::new("/proj"),
+            &LaunchOpts::default(),
+        );
+        let payload = settings_payload(&spec);
+        assert_eq!(payload["apiKeyHelper"], "");
     }
 
     #[test]
