@@ -1,6 +1,6 @@
 [package]
 name = "account-switcher"
-version = "0.2.8"
+version = "0.2.9"
 description = "热切换 Claude Code / Codex 多账号配置的桌面应用"
 authors = ["shixusheng"]
 edition = "2021"
