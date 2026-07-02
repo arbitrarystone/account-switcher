@@ -1,15 +1,23 @@
 /* 多标签终端样式 */
 
+/* 根容器即 Grid：轨道由组件按分屏模式内联下发——
+   单屏     [标签栏 / 面板]
+   右分屏   主列（标签栏+面板）| 分隔条 | 副列（整列到顶，头部与标签栏平齐）
+   下分屏   标签栏 / 主面板 / 分隔条 / 副面板
+   position:relative 供拖拽落点提示层整区覆盖。 */
 .terminal-tabs {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   height: 100%;
+  min-width: 0;
+  position: relative;
 }
 
 .tab-bar {
+  grid-row: 1;
+  grid-column: 1;
+  min-width: 0;
   display: flex;
   gap: 2px;
-  flex-shrink: 0;
   padding: var(--space-1) var(--space-2) 0;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
@@ -60,47 +68,40 @@
   color: var(--text);
 }
 
-.tab-panes {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  --split-ratio: 50;
-}
-
+/* 所有面板都是 Grid 的直接子项（同父平级、跨区移动不重挂载），
+   隐藏面板 display:none 保活。 */
 .tab-pane {
-  position: absolute;
-  inset: 0;
   display: none;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .tab-pane.is-active {
   display: block;
+  grid-row: 2;
+  grid-column: 1;
 }
 
 /* ── 分屏（右分屏 / 下分屏）───────────────────────── */
-/* 激活会话占主屏，被分出去的会话按方向占右侧或下方；比例由
-   --split-ratio 驱动。仍走 absolute 定位（xterm 的 FitAddon 依赖容器
-   有确定尺寸），TerminalView 内的 ResizeObserver 在尺寸变化时自动
-   refit。分屏面板自带小标题栏（可拖回主屏 / 取消分屏 / 关闭）。 */
-.tab-panes.split-row .tab-pane.is-active {
-  right: calc(100% - var(--split-ratio) * 1%);
-}
-
-.tab-panes.split-row .tab-pane.is-split-pane {
+/* 副屏面板 = 小标题栏 + 终端（标题栏可拖回主屏 / 取消分屏 / 关闭）。
+   右分屏时副屏跨满整列（含标签栏那一行），头部与标签栏顶部平齐；
+   下分屏时副屏在主面板之下整行铺开。尺寸变化由 TerminalView 内的
+   ResizeObserver 自动 refit。 */
+.terminal-tabs.split-row .tab-pane.is-split-pane {
   display: flex;
   flex-direction: column;
-  left: calc(var(--split-ratio) * 1%);
+  grid-column: 3;
+  grid-row: 1 / -1;
   border-left: 1px solid var(--border);
 }
 
-.tab-panes.split-col .tab-pane.is-active {
-  bottom: calc(100% - var(--split-ratio) * 1%);
-}
-
-.tab-panes.split-col .tab-pane.is-split-pane {
+.terminal-tabs.split-col .tab-pane.is-split-pane {
   display: flex;
   flex-direction: column;
-  top: calc(var(--split-ratio) * 1%);
+  grid-column: 1;
+  grid-row: 4;
   border-top: 1px solid var(--border);
 }
 
@@ -135,27 +136,23 @@
   min-height: 0;
 }
 
+/* 分隔条本身就是一条 7px 的 Grid 轨道（见组件内联 gridTemplate） */
 .split-divider {
-  position: absolute;
+  position: relative;
   z-index: 3;
   touch-action: none;
+  background: var(--bg-panel);
 }
 
 .split-divider-row {
-  top: 0;
-  bottom: 0;
-  left: calc(var(--split-ratio) * 1%);
-  width: 7px;
-  margin-left: -3px;
+  grid-column: 2;
+  grid-row: 1 / -1;
   cursor: col-resize;
 }
 
 .split-divider-col {
-  left: 0;
-  right: 0;
-  top: calc(var(--split-ratio) * 1%);
-  height: 7px;
-  margin-top: -3px;
+  grid-column: 1;
+  grid-row: 3;
   cursor: row-resize;
 }
 

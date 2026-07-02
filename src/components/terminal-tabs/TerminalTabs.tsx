@@ -105,18 +105,22 @@ function TerminalTabs({ sessions, activeId, onActivate, onClose }: TerminalTabsP
     onDrop: (e: React.DragEvent) => handleDrop(e, zone),
   });
 
-  /** 中缝拖动调整分屏比例（pointer capture，指针移出也不丢）。 */
+  /** 中缝拖动调整分屏比例（pointer capture，指针移出也不丢）。
+   *  比例作用于「两块面板合计」的空间（标签栏那行不参与），故按两块
+   *  面板 pointerdown 时的矩形来换算。 */
   const handleDividerPointerDown = (e: React.PointerEvent) => {
-    const container = panesRef.current;
+    const root = panesRef.current;
     const dir = effectiveSplit?.dir;
-    if (!container || !dir) return;
+    if (!root || !dir) return;
+    const main = root.querySelector(".tab-pane.is-active")?.getBoundingClientRect();
+    const side = root.querySelector(".tab-pane.is-split-pane")?.getBoundingClientRect();
+    if (!main || !side) return;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    const rect = container.getBoundingClientRect();
     const onMove = (ev: PointerEvent) => {
       const pct =
         dir === "row"
-          ? ((ev.clientX - rect.left) / rect.width) * 100
-          : ((ev.clientY - rect.top) / rect.height) * 100;
+          ? ((ev.clientX - main.left) / (main.width + side.width)) * 100
+          : ((ev.clientY - main.top) / (main.height + side.height)) * 100;
       setSplitRatio(Math.min(MAX_RATIO, Math.max(MIN_RATIO, pct)));
     };
     const onUp = () => {
@@ -127,8 +131,30 @@ function TerminalTabs({ sessions, activeId, onActivate, onClose }: TerminalTabsP
     window.addEventListener("pointerup", onUp);
   };
 
+  // Grid 轨道随分屏模式切换：
+  // 单屏     [标签栏 / 面板]
+  // 右分屏   主列（标签栏+面板）| 分隔条 | 副列（整列到顶，头部与标签栏同高对齐）
+  // 下分屏   标签栏 / 主面板 / 分隔条 / 副面板
+  const gridStyle: React.CSSProperties = !effectiveSplit
+    ? { gridTemplateColumns: "minmax(0, 1fr)", gridTemplateRows: "auto minmax(0, 1fr)" }
+    : effectiveSplit.dir === "row"
+      ? {
+          gridTemplateColumns: `minmax(0, ${splitRatio}fr) 7px minmax(0, ${100 - splitRatio}fr)`,
+          gridTemplateRows: "auto minmax(0, 1fr)",
+        }
+      : {
+          gridTemplateColumns: "minmax(0, 1fr)",
+          gridTemplateRows: `auto minmax(0, ${splitRatio}fr) 7px minmax(0, ${100 - splitRatio}fr)`,
+        };
+
   return (
-    <div className="terminal-tabs">
+    <div
+      ref={panesRef}
+      className={
+        "terminal-tabs" + (effectiveSplit ? ` is-split split-${effectiveSplit.dir}` : "")
+      }
+      style={gridStyle}
+    >
       <div className="tab-bar" role="tablist">
         {sessions
           .filter((s) => s.id !== effectiveSplit?.id)
@@ -158,15 +184,7 @@ function TerminalTabs({ sessions, activeId, onActivate, onClose }: TerminalTabsP
             </div>
           ))}
       </div>
-      <div
-        ref={panesRef}
-        className={
-          "tab-panes" +
-          (effectiveSplit ? ` is-split split-${effectiveSplit.dir}` : "")
-        }
-        style={{ "--split-ratio": splitRatio } as React.CSSProperties}
-      >
-        {sessions.map((s) => {
+      {sessions.map((s) => {
           const isSplitPane = s.id === effectiveSplit?.id;
           return (
             <div
@@ -244,7 +262,6 @@ function TerminalTabs({ sessions, activeId, onActivate, onClose }: TerminalTabsP
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }
