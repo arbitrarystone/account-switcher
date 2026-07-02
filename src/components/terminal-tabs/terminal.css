@@ -77,65 +77,136 @@
   display: block;
 }
 
-/* ── 分屏（左右并排）─────────────────────────────── */
-/* 激活会话占左侧，被拖到右侧的会话占右侧；比例由 --split-ratio 驱动。
-   仍走 absolute 定位（xterm 的 FitAddon 依赖容器有确定尺寸），
-   TerminalView 内的 ResizeObserver 会在宽度变化时自动 refit。 */
-.tab-panes.is-split .tab-pane.is-active {
+/* ── 分屏（右分屏 / 下分屏）───────────────────────── */
+/* 激活会话占主屏，被分出去的会话按方向占右侧或下方；比例由
+   --split-ratio 驱动。仍走 absolute 定位（xterm 的 FitAddon 依赖容器
+   有确定尺寸），TerminalView 内的 ResizeObserver 在尺寸变化时自动
+   refit。分屏面板自带小标题栏（可拖回主屏 / 取消分屏 / 关闭）。 */
+.tab-panes.split-row .tab-pane.is-active {
   right: calc(100% - var(--split-ratio) * 1%);
 }
 
-.tab-panes.is-split .tab-pane.is-split-pane {
-  display: block;
+.tab-panes.split-row .tab-pane.is-split-pane {
+  display: flex;
+  flex-direction: column;
   left: calc(var(--split-ratio) * 1%);
   border-left: 1px solid var(--border);
 }
 
+.tab-panes.split-col .tab-pane.is-active {
+  bottom: calc(100% - var(--split-ratio) * 1%);
+}
+
+.tab-panes.split-col .tab-pane.is-split-pane {
+  display: flex;
+  flex-direction: column;
+  top: calc(var(--split-ratio) * 1%);
+  border-top: 1px solid var(--border);
+}
+
+/* 分屏面板 = 标题栏 + 终端，终端占剩余空间 */
+.split-pane-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: grab;
+  user-select: none;
+}
+
+.split-pane-head:active {
+  cursor: grabbing;
+}
+
+.split-pane-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-pane.is-split-pane .terminal-view {
+  flex: 1;
+  min-height: 0;
+}
+
 .split-divider {
   position: absolute;
+  z-index: 3;
+  touch-action: none;
+}
+
+.split-divider-row {
   top: 0;
   bottom: 0;
   left: calc(var(--split-ratio) * 1%);
   width: 7px;
   margin-left: -3px;
   cursor: col-resize;
-  z-index: 3;
-  touch-action: none;
+}
+
+.split-divider-col {
+  left: 0;
+  right: 0;
+  top: calc(var(--split-ratio) * 1%);
+  height: 7px;
+  margin-top: -3px;
+  cursor: row-resize;
 }
 
 .split-divider:hover::after,
 .split-divider:active::after {
   content: "";
   position: absolute;
-  inset: 0 2px;
   background: var(--accent);
   opacity: 0.5;
 }
 
-.tab.is-split {
-  border-top: 2px solid var(--accent);
+.split-divider-row:hover::after,
+.split-divider-row:active::after {
+  inset: 0 2px;
 }
 
-.tab-split-badge {
-  color: var(--accent);
-  font-size: 11px;
-  line-height: 1;
+.split-divider-col:hover::after,
+.split-divider-col:active::after {
+  inset: 2px 0;
 }
 
-/* ── 拖拽落点提示层 ──────────────────────────────── */
+/* ── 拖拽落点提示层（主屏 / 右分屏 / 下分屏）─────────── */
 .drop-zones {
   position: absolute;
   inset: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 34%;
+  grid-template-rows: 1fr 34%;
+  grid-template-areas:
+    "main  right"
+    "bottom right";
   z-index: 4;
 }
 
 .drop-zone {
-  flex: 1;
   display: grid;
   place-items: center;
   border: 2px dashed transparent;
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.drop-zone-main {
+  grid-area: main;
+}
+
+.drop-zone-right {
+  grid-area: right;
+}
+
+.drop-zone-bottom {
+  grid-area: bottom;
 }
 
 .drop-zone.is-hover {

@@ -21,65 +21,102 @@ interface TerminalTabsProps {
 }
 
 const DRAG_MIME = "text/accsw-session";
-/** 分屏比例的可调范围（%），避免拖到不可用的极端宽度。 */
+/** 分屏比例的可调范围（%），避免拖到不可用的极端尺寸。 */
 const MIN_RATIO = 20;
 const MAX_RATIO = 80;
+
+/** 分屏方向：row = 左右并排（副屏在右），col = 上下堆叠（副屏在下）。 */
+interface SplitState {
+  id: string;
+  dir: "row" | "col";
+}
 
 /**
  * 多标签终端：每个会话一个标签 + 常驻 TerminalView。
  * 非激活面板用 CSS 隐藏（保活，避免丢失终端内容），激活时 TerminalView 内的
  * ResizeObserver 会自动 refit。
  *
- * 分屏：把标签拖到终端区，落在左/右半屏即把该会话放到对应侧（左右并排、
- * 中缝可拖动调宽）。把右侧会话拖回左半屏、或关闭右侧会话即取消分屏。
+ * 分屏：拖动标签（或副屏标题栏）到终端区，落点分「主屏 / 右分屏 / 下分屏」。
+ * 分屏后该会话的标签从标签栏移走，由副屏自带的小标题栏承载（可拖回主屏、
+ * 可取消分屏、可关闭）；中缝可拖动调比例。所有面板始终同父平级挂载，
+ * 跨区移动只改 CSS——不重挂载、终端滚动缓冲不丢。
  */
 function TerminalTabs({ sessions, activeId, onActivate, onClose }: TerminalTabsProps) {
   const noopExit = useCallback(() => {}, []);
-  const [splitId, setSplitId] = useState<string | null>(null);
+  const [split, setSplit] = useState<SplitState | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dropHint, setDropHint] = useState<"left" | "right" | null>(null);
+  const [dropHint, setDropHint] = useState<"main" | "right" | "bottom" | null>(null);
   const [splitRatio, setSplitRatio] = useState(50);
   const panesRef = useRef<HTMLDivElement>(null);
 
   // 会话被关掉、或与激活标签重合时，分屏自动失效（渲染期守卫，不留脏状态）。
-  const effectiveSplitId =
-    splitId && splitId !== activeId && sessions.some((s) => s.id === splitId)
-      ? splitId
+  const effectiveSplit =
+    split && split.id !== activeId && sessions.some((s) => s.id === split.id)
+      ? split
       : null;
+  const splitSession = effectiveSplit
+    ? sessions.find((s) => s.id === effectiveSplit.id)
+    : null;
 
-  /** 把会话放到某一侧。右侧 = 分屏；左侧 = 激活（若它原本在右侧则取消分屏）。 */
-  const placeSession = (id: string, side: "left" | "right") => {
-    if (side === "right") {
-      if (sessions.length < 2) return; // 只有一个会话没法分
-      if (id === activeId) {
-        // 把当前激活的放到右边：左边自动切到下一个会话
-        const other = sessions.find((s) => s.id !== id);
-        if (!other) return;
-        onActivate(other.id);
-      }
-      setSplitId(id);
-    } else {
+  /** 把会话放到某个区域。主屏 = 激活（若它原本是副屏则取消分屏）；右/下 = 分屏。 */
+  const placeSession = (id: string, zone: "main" | "right" | "bottom") => {
+    if (zone === "main") {
       onActivate(id);
-      if (id === splitId) setSplitId(null);
+      if (id === split?.id) setSplit(null);
+      return;
     }
+    if (sessions.length < 2) return; // 只有一个会话没法分
+    if (id === activeId) {
+      // 把当前激活的分出去：主屏自动切到另一个会话
+      const other = sessions.find((s) => s.id !== id);
+      if (!other) return;
+      onActivate(other.id);
+    }
+    setSplit({ id, dir: zone === "right" ? "row" : "col" });
   };
 
-  const handleDrop = (e: React.DragEvent, side: "left" | "right") => {
+  const handleDrop = (e: React.DragEvent, zone: "main" | "right" | "bottom") => {
     e.preventDefault();
     const id = e.dataTransfer.getData(DRAG_MIME);
     setDraggingId(null);
     setDropHint(null);
-    if (id && sessions.some((s) => s.id === id)) placeSession(id, side);
+    if (id && sessions.some((s) => s.id === id)) placeSession(id, zone);
   };
+
+  const dragProps = (id: string) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData(DRAG_MIME, id);
+      e.dataTransfer.effectAllowed = "move";
+      setDraggingId(id);
+    },
+    onDragEnd: () => {
+      setDraggingId(null);
+      setDropHint(null);
+    },
+  });
+
+  const zoneProps = (zone: "main" | "right" | "bottom") => ({
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault();
+      setDropHint(zone);
+    },
+    onDragLeave: () => setDropHint(null),
+    onDrop: (e: React.DragEvent) => handleDrop(e, zone),
+  });
 
   /** 中缝拖动调整分屏比例（pointer capture，指针移出也不丢）。 */
   const handleDividerPointerDown = (e: React.PointerEvent) => {
     const container = panesRef.current;
-    if (!container) return;
+    const dir = effectiveSplit?.dir;
+    if (!container || !dir) return;
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     const rect = container.getBoundingClientRect();
     const onMove = (ev: PointerEvent) => {
-      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      const pct =
+        dir === "row"
+          ? ((ev.clientX - rect.left) / rect.width) * 100
+          : ((ev.clientY - rect.top) / rect.height) * 100;
       setSplitRatio(Math.min(MAX_RATIO, Math.max(MIN_RATIO, pct)));
     };
     const onUp = () => {
@@ -93,72 +130,94 @@ function TerminalTabs({ sessions, activeId, onActivate, onClose }: TerminalTabsP
   return (
     <div className="terminal-tabs">
       <div className="tab-bar" role="tablist">
-        {sessions.map((s) => (
-          <div
-            key={s.id}
-            className={
-              "tab" +
-              (s.id === activeId ? " is-active" : "") +
-              (s.id === effectiveSplitId ? " is-split" : "")
-            }
-            onClick={() => onActivate(s.id)}
-            role="tab"
-            aria-selected={s.id === activeId}
-            title={`${s.projectDir}（拖到终端区左/右半屏可分屏）`}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData(DRAG_MIME, s.id);
-              e.dataTransfer.effectAllowed = "move";
-              setDraggingId(s.id);
-            }}
-            onDragEnd={() => {
-              setDraggingId(null);
-              setDropHint(null);
-            }}
-          >
-            <span className="account-dot" data-tool={s.tool} aria-hidden="true" />
-            <span className="tab-label">{s.accountName}</span>
-            {s.id === effectiveSplitId && (
-              <span className="tab-split-badge" title="在右侧分屏" aria-hidden="true">
-                ◫
-              </span>
-            )}
-            <button
-              className="tab-close"
-              title="结束会话"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (s.id === splitId) setSplitId(null);
-                onClose(s.id);
-              }}
+        {sessions
+          .filter((s) => s.id !== effectiveSplit?.id)
+          .map((s) => (
+            <div
+              key={s.id}
+              className={"tab" + (s.id === activeId ? " is-active" : "")}
+              onClick={() => onActivate(s.id)}
+              role="tab"
+              aria-selected={s.id === activeId}
+              title={`${s.projectDir}（拖到终端区可分屏）`}
+              {...dragProps(s.id)}
             >
-              ✕
-            </button>
-          </div>
-        ))}
+              <span className="account-dot" data-tool={s.tool} aria-hidden="true" />
+              <span className="tab-label">{s.accountName}</span>
+              <button
+                className="tab-close"
+                title="结束会话"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (s.id === split?.id) setSplit(null);
+                  onClose(s.id);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
       </div>
       <div
         ref={panesRef}
-        className={"tab-panes" + (effectiveSplitId ? " is-split" : "")}
+        className={
+          "tab-panes" +
+          (effectiveSplit ? ` is-split split-${effectiveSplit.dir}` : "")
+        }
         style={{ "--split-ratio": splitRatio } as React.CSSProperties}
       >
-        {sessions.map((s) => (
+        {sessions.map((s) => {
+          const isSplitPane = s.id === effectiveSplit?.id;
+          return (
+            <div
+              key={s.id}
+              className={
+                "tab-pane" +
+                (s.id === activeId ? " is-active" : "") +
+                (isSplitPane ? " is-split-pane" : "")
+              }
+            >
+              {isSplitPane && splitSession && (
+                <div
+                  key="head"
+                  className="split-pane-head"
+                  title={`${splitSession.projectDir}（可拖回主屏）`}
+                  {...dragProps(s.id)}
+                >
+                  <span
+                    className="account-dot"
+                    data-tool={splitSession.tool}
+                    aria-hidden="true"
+                  />
+                  <span className="split-pane-title">{splitSession.accountName}</span>
+                  <button
+                    className="tab-close"
+                    title="取消分屏（回到标签栏）"
+                    onClick={() => setSplit(null)}
+                  >
+                    ◱
+                  </button>
+                  <button
+                    className="tab-close"
+                    title="结束会话"
+                    onClick={() => {
+                      setSplit(null);
+                      onClose(s.id);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              <TerminalView key="term" sessionId={s.id} onExit={noopExit} />
+            </div>
+          );
+        })}
+        {effectiveSplit && (
           <div
-            key={s.id}
-            className={
-              "tab-pane" +
-              (s.id === activeId ? " is-active" : "") +
-              (s.id === effectiveSplitId ? " is-split-pane" : "")
-            }
-          >
-            <TerminalView sessionId={s.id} onExit={noopExit} />
-          </div>
-        ))}
-        {effectiveSplitId && (
-          <div
-            className="split-divider"
+            className={"split-divider split-divider-" + effectiveSplit.dir}
             role="separator"
-            aria-orientation="vertical"
+            aria-orientation={effectiveSplit.dir === "row" ? "vertical" : "horizontal"}
             title="拖动调整分屏比例"
             onPointerDown={handleDividerPointerDown}
           />
@@ -166,26 +225,22 @@ function TerminalTabs({ sessions, activeId, onActivate, onClose }: TerminalTabsP
         {draggingId && (
           <div className="drop-zones">
             <div
-              className={"drop-zone" + (dropHint === "left" ? " is-hover" : "")}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDropHint("left");
-              }}
-              onDragLeave={() => setDropHint(null)}
-              onDrop={(e) => handleDrop(e, "left")}
+              className={"drop-zone drop-zone-main" + (dropHint === "main" ? " is-hover" : "")}
+              {...zoneProps("main")}
             >
-              <span className="drop-zone-label">左半屏</span>
+              <span className="drop-zone-label">主屏</span>
             </div>
             <div
-              className={"drop-zone" + (dropHint === "right" ? " is-hover" : "")}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDropHint("right");
-              }}
-              onDragLeave={() => setDropHint(null)}
-              onDrop={(e) => handleDrop(e, "right")}
+              className={"drop-zone drop-zone-right" + (dropHint === "right" ? " is-hover" : "")}
+              {...zoneProps("right")}
             >
-              <span className="drop-zone-label">右半屏</span>
+              <span className="drop-zone-label">右分屏</span>
+            </div>
+            <div
+              className={"drop-zone drop-zone-bottom" + (dropHint === "bottom" ? " is-hover" : "")}
+              {...zoneProps("bottom")}
+            >
+              <span className="drop-zone-label">下分屏</span>
             </div>
           </div>
         )}
