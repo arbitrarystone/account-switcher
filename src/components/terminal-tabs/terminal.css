@@ -64,6 +64,7 @@
   position: relative;
   flex: 1;
   min-height: 0;
+  --split-ratio: 50;
 }
 
 .tab-pane {
@@ -74,4 +75,87 @@
 
 .tab-pane.is-active {
   display: block;
+}
+
+/* ── 分屏（左右并排）─────────────────────────────── */
+/* 激活会话占左侧，被拖到右侧的会话占右侧；比例由 --split-ratio 驱动。
+   仍走 absolute 定位（xterm 的 FitAddon 依赖容器有确定尺寸），
+   TerminalView 内的 ResizeObserver 会在宽度变化时自动 refit。 */
+.tab-panes.is-split .tab-pane.is-active {
+  right: calc(100% - var(--split-ratio) * 1%);
+}
+
+.tab-panes.is-split .tab-pane.is-split-pane {
+  display: block;
+  left: calc(var(--split-ratio) * 1%);
+  border-left: 1px solid var(--border);
+}
+
+.split-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--split-ratio) * 1%);
+  width: 7px;
+  margin-left: -3px;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+
+.split-divider:hover::after,
+.split-divider:active::after {
+  content: "";
+  position: absolute;
+  inset: 0 2px;
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.tab.is-split {
+  border-top: 2px solid var(--accent);
+}
+
+.tab-split-badge {
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* ── 拖拽落点提示层 ──────────────────────────────── */
+.drop-zones {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  z-index: 4;
+}
+
+.drop-zone {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  border: 2px dashed transparent;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.drop-zone.is-hover {
+  background: oklch(74% 0.13 184 / 0.12);
+  border-color: var(--accent);
+}
+
+.drop-zone-label {
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.drop-zone.is-hover .drop-zone-label {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--accent);
 }
