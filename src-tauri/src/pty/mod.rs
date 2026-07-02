@@ -136,6 +136,51 @@ pub fn backfill_token_usage(app: AppHandle, usage: crate::usage::UsageStore) {
     });
 }
 
+/// Windows 上 npm 装的 claude/codex 是 `claude.cmd` 批处理垫片，且同目录还有
+/// 一个**无扩展名**的 `claude`（Git Bash 用的 sh 脚本）。portable-pty 的 PATH
+/// 搜索会先命中无扩展名文件，CreateProcessW 对非 PE 文件报「%1 不是有效的
+/// Win32 应用程序」（os error 193）。故拉起前按 PATHEXT 语义自行解析出真正
+/// 可执行的完整路径（.cmd/.bat 由 CreateProcess 隐式经 cmd.exe 执行）。
+/// 带路径分隔符或已带可执行扩展名的输入原样返回；找不到时也原样返回，
+/// 让后续报错仍指向原始命令名。逻辑跨平台可测，仅在 Windows 构建时启用。
+/// 把错误文本里出现的敏感 env 值（Token/Key）替换为 `***`。
+/// CreateProcessW 失败时 portable-pty 的报错会附带完整命令行——其中
+/// `--settings` JSON 里就有明文 token，直接透传会把密钥打到前端状态栏
+/// （spec §8：Token 绝不进日志/错误信息）。
+fn redact_secrets(msg: &str, env: &std::collections::BTreeMap<String, String>) -> String {
+    let mut out = msg.to_string();
+    for (k, v) in env {
+        let upper = k.to_ascii_uppercase();
+        if (upper.contains("TOKEN") || upper.contains("KEY")) && !v.is_empty() {
+            out = out.replace(v.as_str(), "***");
+        }
+    }
+    out
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn resolve_windows_program(program: &str, path_value: Option<&str>) -> String {
+    const EXTS: [&str; 4] = [".com", ".exe", ".bat", ".cmd"];
+    let lower = program.to_ascii_lowercase();
+    if program.contains('/') || program.contains('\\') || EXTS.iter().any(|e| lower.ends_with(e))
+    {
+        return program.to_string();
+    }
+    let Some(path_value) = path_value else {
+        return program.to_string();
+    };
+    for dir in std::env::split_paths(path_value) {
+        // 同目录内按 PATHEXT 顺序优先，且**跳过**无扩展名的同名文件。
+        for ext in EXTS {
+            let candidate = dir.join(format!("{program}{ext}"));
+            if candidate.is_file() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+    program.to_string()
+}
+
 struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
@@ -168,7 +213,20 @@ impl PtyManager {
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
         // 从干净基底构造命令：env_clear 后只注入本账号的隔离 env。
-        let mut cmd = CommandBuilder::new(&spec.program);
+        // Windows：先解析出 .cmd/.exe 真身，避免命中无扩展名的 sh 垫片（os error 193）。
+        // 注：Windows 上环境变量名大小写不敏感，实际常存作 "Path"，需忽略大小写查找。
+        #[cfg(windows)]
+        let program = {
+            let path_value = spec
+                .env
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
+                .map(|(_, v)| v.as_str());
+            resolve_windows_program(&spec.program, path_value)
+        };
+        #[cfg(not(windows))]
+        let program = spec.program.clone();
+        let mut cmd = CommandBuilder::new(&program);
         cmd.args(&spec.args);
         cmd.cwd(&spec.cwd);
         cmd.env_clear();
@@ -183,7 +241,8 @@ impl PtyManager {
         let mut child = pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| PtyError::Spawn(e.to_string()))?;
+            // CreateProcessW 类错误会回显完整命令行（含 --settings 里的 token），脱敏后再抛
+            .map_err(|e| PtyError::Spawn(redact_secrets(&e.to_string(), &spec.env)))?;
         drop(pair.slave);
 
         let mut reader = pair
@@ -418,5 +477,73 @@ mod tests {
         let out = sink.output_for("sx");
         assert!(out.contains("LEAK=[]"), "继承了未注入的父进程变量: {out:?}");
         std::env::remove_var("ACCSW_TEST_LEAK");
+    }
+
+    #[test]
+    fn redact_secrets_strips_token_values_from_error_text() {
+        // Windows CreateProcessW 报错会回显完整命令行（含 --settings 里的明文 token）
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), "fe_oa_secret123".to_string());
+        env.insert("ANTHROPIC_API_KEY".to_string(), String::new()); // 空值不参与替换
+        env.insert("PATH".to_string(), "/usr/bin".to_string()); // 非敏感不替换
+
+        let msg = r#"CreateProcessW "claude --settings {\"ANTHROPIC_AUTH_TOKEN\":\"fe_oa_secret123\"}" in /usr/bin failed"#;
+        let out = redact_secrets(msg, &env);
+        assert!(!out.contains("fe_oa_secret123"), "token 未被脱敏: {out}");
+        assert!(out.contains("***"));
+        assert!(out.contains("/usr/bin"), "非敏感值不应被动到");
+    }
+
+    // ── Windows 程序名解析（跨平台可测的纯逻辑）────────────
+
+    #[test]
+    fn windows_resolver_prefers_cmd_over_extensionless() {
+        // 模拟 npm 全局目录：同名的无扩展名 sh 垫片 + claude.cmd 并存，
+        // 必须选 .cmd（CreateProcessW 对 sh 脚本报 os error 193）。
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("claude"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.path().join("claude.cmd"), "@echo off\n").unwrap();
+
+        let resolved = resolve_windows_program("claude", dir.path().to_str());
+        assert!(
+            resolved.to_ascii_lowercase().ends_with("claude.cmd"),
+            "应解析到 .cmd 真身，实际: {resolved}"
+        );
+    }
+
+    #[test]
+    fn windows_resolver_searches_path_dirs_in_order() {
+        let dir_a = tempfile::tempdir().unwrap(); // 无匹配
+        let dir_b = tempfile::tempdir().unwrap();
+        std::fs::write(dir_b.path().join("codex.exe"), "MZ").unwrap();
+        let path_value = std::env::join_paths([dir_a.path(), dir_b.path()])
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        let resolved = resolve_windows_program("codex", Some(&path_value));
+        assert!(
+            resolved.to_ascii_lowercase().ends_with("codex.exe"),
+            "应在第二个 PATH 目录找到 .exe，实际: {resolved}"
+        );
+    }
+
+    #[test]
+    fn windows_resolver_passes_through_paths_and_extensions() {
+        // 带路径分隔符 / 已带扩展名 / PATH 里找不到 → 原样返回
+        assert_eq!(
+            resolve_windows_program("C:\\tools\\claude.cmd", Some("ignored")),
+            "C:\\tools\\claude.cmd"
+        );
+        assert_eq!(
+            resolve_windows_program("claude.CMD", Some("ignored")),
+            "claude.CMD"
+        );
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_windows_program("claude", empty.path().to_str()),
+            "claude"
+        );
+        assert_eq!(resolve_windows_program("claude", None), "claude");
     }
 }
